@@ -50,7 +50,7 @@ Nesta seção, encontra-se o dicionário das variáveis que compõem as bases de
 Para as análises subsequentes, foram selecionados somente os casos em que o recém-nascido (RN) foi registrado com pelo menos uma CID-10 que faz parte do Capítulo XVII. Malformações congênitas, deformidades e anomalias cromossômicas (Q000-Q999) **ou** com a CID-10 D180, cuja descrição é hemangioma de qualquer localização.
 
 ```{r}
-d_anom <- readr::read_csv("01.dados/anomalias/microdados_ac_11-20.csv") |> 
+d_anom <- readr::read_csv("01.dados/anomalias/microdados_ac_11-20.csv.gz") |> 
   # selecionando anos de 2011 a 2020 e apenas cids do capitulo xvii + d180
   filter(
     as.numeric(ano_nasc) > 2010,
