@@ -895,7 +895,7 @@ vas_num <- d_anom |>
   select(CONSPRENAT, IDADEMAE, PESO, SEMAGESTAC)
 
 datasummary_skim(data = vas_num) |> 
-  kableExtra::kable_styling(latex_options = "HOLD_position")
+  tinytable::theme_tt("tabular")
 ```
 
 \newpage
