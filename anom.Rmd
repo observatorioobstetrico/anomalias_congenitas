@@ -2827,7 +2827,7 @@ d_geobr <- sf_uf_br |>
 # cardiopatias
 g01 <- ggplot(d_geobr |> filter(grupo_eur == "Cardiopatias"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Cardiopatias", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2847,7 +2847,7 @@ g01 <- ggplot(d_geobr |> filter(grupo_eur == "Cardiopatias"), aes(fill = prev)) 
 # defeitos de parede abdominal
 g02 <- ggplot(d_geobr |> filter(grupo_eur == "Defeitos de parede abdominal"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Defeitos de parede abdominal", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2867,7 +2867,7 @@ g02 <- ggplot(d_geobr |> filter(grupo_eur == "Defeitos de parede abdominal"), ae
 # fendas oro-faciais
 g03 <- ggplot(d_geobr |> filter(grupo_eur == "Fendas oro-faciais"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Fendas oro-faciais", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2887,7 +2887,7 @@ g03 <- ggplot(d_geobr |> filter(grupo_eur == "Fendas oro-faciais"), aes(fill = p
 # genitalia
 g04 <- ggplot(d_geobr |> filter(grupo_eur == "Genitália"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Genitália", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2907,7 +2907,7 @@ g04 <- ggplot(d_geobr |> filter(grupo_eur == "Genitália"), aes(fill = prev)) +
 # membros
 g06 <- ggplot(d_geobr |> filter(grupo_eur == "Membros"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Membros", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2927,7 +2927,7 @@ g06 <- ggplot(d_geobr |> filter(grupo_eur == "Membros"), aes(fill = prev)) +
 # olhos
 g07 <- ggplot(d_geobr |> filter(grupo_eur == "Olhos"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Olhos", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2947,7 +2947,7 @@ g07 <- ggplot(d_geobr |> filter(grupo_eur == "Olhos"), aes(fill = prev)) +
 # orelha, face e pescoco
 g08 <- ggplot(d_geobr |> filter(grupo_eur == "Orelha, face e pescoço"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Orelha, face e pescoço", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2967,7 +2967,7 @@ g08 <- ggplot(d_geobr |> filter(grupo_eur == "Orelha, face e pescoço"), aes(fil
 # respiratorias
 g09 <- ggplot(d_geobr |> filter(grupo_eur == "Respiratórias"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Respiratórias", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -2987,7 +2987,7 @@ g09 <- ggplot(d_geobr |> filter(grupo_eur == "Respiratórias"), aes(fill = prev)
 # sistema digestivo
 g10 <- ggplot(d_geobr |> filter(grupo_eur == "Sistema digestivo"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Sistema digestivo", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -3007,7 +3007,7 @@ g10 <- ggplot(d_geobr |> filter(grupo_eur == "Sistema digestivo"), aes(fill = pr
 # sistema nervoso
 g11 <- ggplot(d_geobr |> filter(grupo_eur == "Sistema nervoso"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Sistema nervoso", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -3027,7 +3027,7 @@ g11 <- ggplot(d_geobr |> filter(grupo_eur == "Sistema nervoso"), aes(fill = prev
 # sistema urinario
 g12 <- ggplot(d_geobr |> filter(grupo_eur == "Sistema urinário"), aes(fill = prev)) + 
   geom_sf() +
-  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous")) + 
+  scale_fill_gradientn(colours = wes_palette("Zissou1", 100, type = "continuous"), label = function(x) gsub("\\.", ",", sprintf("%.1f", x))) +
   labs(title = "Sistema urinário", fill = "Prevalência \npor 1.000 NV") +
   theme_minimal() +
   theme(
@@ -3043,5 +3043,7 @@ g12 <- ggplot(d_geobr |> filter(grupo_eur == "Sistema urinário"), aes(fill = pr
     pad_x = unit(0.5, "in"), pad_y = unit(0.2, "in"),
     style = north_arrow_fancy_orienteering
   )
+
+#(g01 + g02 + g03) / (g04 + g06 + g07) / (g08 + g09 + g10) / (g11 + g12)
 ```
 
