@@ -12,13 +12,15 @@ SINASC - `01.dados/`
 
 ### Script
 
-Full analysis - `anom.Rmd`
+Exploratory analysis - `anom.Rmd`
+
+ACP/AACP analysis - `anom_acp-aacp.Rmd`
 
 ### Results
 
-Tables - `02.analise/tab_geradas/`
+Tables - `02.results/tables/`
 
-Figures - `02.analise/graficos/`
+Figures - `02.results/figures/`
 
 ### Software
 
