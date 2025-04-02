@@ -1,8 +1,8 @@
-# Prevalência e tendências de anomalias congênitas maiores no Brasil: um estudo de 2011 a 2020
+# Prevalence and trends of major congenital anomalies in Brazil: a study from 2011 to 2020
 
-Este estudo teve como objetivo analisar a prevalência de anomalias congênitas no Brasil e sua potencial associação com fatores socioeconômicos, gestacionais e regionais por meio dos dados do Sistema de Informações sobre os Nascidos Vivos (SINASC) do período de 2011 a 2020. De uma população total de 29.025.461 nascidos vivos, foi incluída uma coorte de 240.405 recém-nascidos com anomalias congênitas, que foram posteriormente categorizados com uma única malformação maior ou com múltiplas malformações maiores.
+This study aimed to analyze the prevalence of congenital anomalies in Brazil and their potential association with socioeconomic, gestational and regional factors using data from the Live Birth Information System (Sistema de Informações sobre Nascidos Vivos - SINASC) from 2011 to 2020. From a total population of 29,025,461 live births, a cohort of 240,405 newborns with congenital anomalies was included, who were subsequently categorized as having a single or multiple major malformations.
 
-Fontes financiadoras: Bill & Melinda Gates Foundation, CNPq e FAPES.
+Funding: Bill & Melinda Gates Foundation, CNPq and FAPES.
 
 <br>
 
