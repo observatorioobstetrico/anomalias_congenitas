@@ -6,23 +6,24 @@ Funding: Bill & Melinda Gates Foundation, CNPq and FAPES.
 
 <br>
 
-### Dados
+### Data
+
 SINASC - `01.dados/`
 
-### Códigos
-`anom.Rmd`
+### Script
 
-### Resultados
-Relatório - `anom.pdf`
+Full analysis - `anom.Rmd`
 
-Gráficos - `02.analise/graficos/`
+### Results
 
-Tabelas - `02.analise/tab_geradas/`
+Tables - `02.analise/tab_geradas/`
+
+Figures - `02.analise/graficos/`
 
 ### Software
 
 R, versão 4.3.3, sob a IDE RStudio
 
-### Sistema Operacional
+### Operating System
 
 macOS Sonoma 14.5, com Processador M3 Max 14 núcleos e 36GB RAM
