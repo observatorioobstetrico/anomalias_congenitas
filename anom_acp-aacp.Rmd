@@ -1,0 +1,1482 @@
+---
+title: Análise ACP/AACP para dados de nascidos vivos diagnosticados com anomalia congênita - 11-20
+header-includes:
+  - \renewcommand{\contentsname}{Sumário}
+output: 
+  pdf_document:
+    toc: yes
+    toc_depth: "1"
+    keep_tex: yes
+  word_document: default
+  html_document:
+    self_contained: no
+---
+
+```{r setup, include = FALSE, echo = TRUE, message = FALSE, warning = FALSE, error = FALSE, results = 'hide', out.width = "70%"}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, error = FALSE)
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE, error = FALSE, results = 'hide'}
+#dados
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(janitor)
+library(stringr)
+library(modelsummary)
+library(questionr)
+#tabelas
+library(knitr)
+```
+
+Neste relatório, será apresentada a análise da variação percentual anual (Annual Percent Change - APC, em inglês) e da variação percentual média anual (Average Annual Percent Change - AAPC, em inglês) dos microdrados de anomalias congênitas obtidos das bases do SINASC.
+
+\newpage
+
+# 1. Manipulação dos dados
+
+Nesta seção, foi feita uma breve higienização dos dados a fim de melhor manipulá-los.
+
+### Selecionando anos de 2011 a 2020 e apenas CIDs do Capítulo XVII + D180
+
+```{r}
+d_anom <- readr::read_csv("01.dados/anomalias/microdados_ac_11-20.csv.gz") |> 
+  # selecionando anos de 2011 a 2020 e apenas cids do capitulo xvii + d180
+  filter(
+    as.numeric(ano_nasc) > 2010,
+    str_detect(CODANOMAL, "Q") | str_detect(CODANOMAL, "D180")
+ )
+```
+
+### Transformando valores 99 e categoria 'ignorado' em NAs
+
+```{r}
+d_anom <- d_anom |>  
+  mutate(
+    CONSPRENAT = as.numeric(ifelse(CONSPRENAT == 99, NA_character_, CONSPRENAT)),
+    IDADEMAE = as.numeric(ifelse(IDADEMAE == 99, NA_character_, IDADEMAE)),
+    IDADEPAI = as.numeric(ifelse(IDADEPAI == 99, NA_character_, IDADEPAI)),
+    KOTELCHUCK = as.numeric(ifelse(KOTELCHUCK == 9, NA_character_, KOTELCHUCK)),
+    MESPRENAT = as.numeric(ifelse(MESPRENAT == 99, NA_character_, MESPRENAT)),
+    PESO = as.numeric(ifelse(PESO == 9999, NA_character_, PESO)),
+    QTDFILMORT = as.numeric(ifelse(QTDFILMORT == 99, NA_character_, QTDFILMORT)),
+    QTDFILVIVO = as.numeric(ifelse(QTDFILVIVO == 99, NA_character_, QTDFILVIVO)),
+    QTDGESTANT = as.numeric(ifelse(QTDGESTANT == 99, NA_character_, QTDGESTANT)),
+    QTDPARTCES = as.numeric(ifelse(QTDPARTCES == 99, NA_character_, QTDPARTCES)),
+    QTDPARTNOR = as.numeric(ifelse(QTDPARTNOR == 99, NA_character_, QTDPARTNOR)),
+    def_anomalia = ifelse(def_anomalia == "Ignorado", NA_character_, def_anomalia),
+    def_consultas = ifelse(def_consultas == "Ignorado", NA_character_, def_consultas),
+    def_escol_mae = ifelse(def_escol_mae == "Ignorado", NA_character_, def_escol_mae),
+    def_est_civil = ifelse(def_est_civil == "Ignorado", NA_character_, def_est_civil),
+    def_gestacao = ifelse(def_gestacao == "Ignorado", NA_character_, def_gestacao),
+    def_gravidez = ifelse(def_gravidez == "Ignorado", NA_character_, def_gravidez),
+    def_loc_nasc = ifelse(def_loc_nasc == "Ignorado", NA_character_, def_loc_nasc),
+    def_parto = ifelse(def_parto == "Ignorado", NA_character_, def_parto),
+    def_parto_prematuro = ifelse(def_parto_prematuro == "Ignorado", NA_character_, def_parto_prematuro),
+    def_raca_cor = ifelse(def_raca_cor == "Ignorado", NA_character_, def_raca_cor),
+    def_sexo = ifelse(def_sexo == "Ignorado", NA_character_, def_sexo),
+    TPROBSON = ifelse((d_anom$TPROBSON == 11 | d_anom$TPROBSON == 12), NA_character_, d_anom$TPROBSON)
+ )
+```
+
+### Separando casos em que o nascido tem mais de uma malformação congênita
+
+```{r}
+d_anom <- d_anom %>%
+  separate(
+    ., col = CODANOMAL, 
+    into = c("coda1", "coda2", "coda3", "coda4", "coda5", "coda6"), sep = "Q", 
+    remove = FALSE
+  ) |>
+  # incluindo na nas celulas vazias das cids
+  mutate(
+    coda1 = ifelse(coda1 == "", NA_character_, coda1),
+    coda2 = ifelse(coda2 == "", NA_character_, coda2),
+    coda3 = ifelse(coda3 == "", NA_character_, coda3),
+    coda4 = ifelse(coda4 == "", NA_character_, coda4),
+    coda5 = ifelse(coda5 == "", NA_character_, coda5),
+    coda6 = ifelse(coda6 == "", NA_character_, coda6)
+  ) |> 
+  # retirando espaco entre os caracteres das cids
+  mutate(
+    coda1 = gsub(" ", "", coda1),
+    coda2 = gsub(" ", "", coda2),
+    coda3 = gsub(" ", "", coda3),
+    coda4 = gsub(" ", "", coda4),
+    coda5 = gsub(" ", "", coda5),
+    coda6 = gsub(" ", "", coda6)
+  )
+```
+
+### Incluindo 'Q' nas CID-10 relacionadas ao Capítulo XVII e separando e incluindo NA\* nas CID-10\*\* que não fazem parte do Capítulo XVII
+
+*\* Exceto a CID-10 D180.*
+
+*\*\* Algumas doenças que fazem parte dos capítulos I, II, III, IV, XI e XII.*
+
+```{r}
+d_anom <- d_anom |> 
+  mutate(
+    coda1 = ifelse(str_length(coda1) == 3, paste0("Q", coda1), coda1),
+    coda2 = ifelse(str_length(coda2) == 3, paste0("Q", coda2), coda2),
+    coda3 = ifelse(str_length(coda3) == 3, paste0("Q", coda3), coda3),
+    coda4 = ifelse(str_length(coda4) == 3, paste0("Q", coda4), coda4),
+    coda5 = ifelse(str_length(coda5) == 3, paste0("Q", coda5), coda5),
+    coda6 = ifelse(str_length(coda6) == 3, paste0("Q", coda6), coda6),
+    # casos que nao fazem parte do capitulo xvii
+    coda7 = str_sub(coda1, end = 4),
+    coda8 = str_sub(coda1, start = 5, end = 8),
+    coda9 = str_sub(coda1, start = 9, end = 12)
+  ) |>
+  # incluindo na em cids que nao fazem parte do capitulo xvii
+  mutate(
+    coda7 = ifelse((str_detect(coda7, "C") | str_detect(coda7, "E") |
+                     str_detect(coda7, "K")| str_detect(coda7, "P") |
+                      coda7 == "D649" | coda7 == "D823"), NA, coda7),
+    coda8 = ifelse((coda8 == "D691" | coda8 == "P285" | coda8 == "P294" |
+                     coda8 == "P299"), NA, coda8),
+    coda9 = ifelse(coda9 == "K429", NA, coda9)
+  ) |>
+  # incluindo na nas celulas vazias
+  mutate(
+    coda7 = ifelse(coda7 == "", NA_character_, coda7),
+    coda8 = ifelse(coda8 == "", NA_character_, coda8),
+    coda9 = ifelse(coda9 == "", NA_character_, coda9)
+ )
+```
+
+\newpage
+
+# 2. Anomalias congênitas e cromossômicas
+
+Nesta seção, o objetivo consistiu em identificar os RNs classificados com malformação congênita ou cromossômica. Os casos em que havia pelo menos uma malformação cromossômica, cuja CID-10 está entre Q900-Q999, foram **removidos** das análises subsequentes.
+
+### Criando variável indicadora para identificar os RNs classificados com malformação congênita ou malformação cromossômica
+
+```{r}
+d_anom <- d_anom |>
+  mutate(
+    class_malf = case_when(
+    str_detect(CODANOMAL, "Q9") ~ "cromossômica",
+    TRUE ~ "congênita"
+   )
+ )
+```
+
+```{r}
+freq(
+  d_anom$class_malf,
+  cum = FALSE, total = TRUE,
+  na.last = FALSE, valid = TRUE
+  ) |>
+  kable(
+    caption = "Tabela de frequências para o número de RNs com malformações congênitas e malformações cromossômicas.", 
+    digits = 4
+  ) |> 
+  kableExtra::kable_styling(latex_options = "HOLD_position")
+```
+
+\newpage
+
+# 3. Anomalias congênitas menores e maiores
+
+Nesta seção, as anomalias congênitas foram classificadas em malformação congênita maior ou malformação congênita menor, conforme definição da *European Surveillance of Congenital Anomalies* (EUROCAT). O objetivo dessa análise é identificar a quantidade verdadeira de anomalias pela qual o nascido foi acometido.
+
+Para o cálculo das malformações e análises subsequentes, foram removidas **apenas** as anomalias congênitas menores únicas e menores múltiplas (ou seja, quando o nascido tem mais de uma malformação, porém todas consideradas como menor). Portanto, se um RN foi registrado com as CID-10 Q539 (menor) e Q793 (maior), por exemplo, ambas foram consideradas na contagem e a malformação classificada como múltipla.
+
+### Criando variável indicadora que identifica a classificação, se maior ou menor, da malformação congênita
+
+```{r}
+# cids maiores, segundo eurocat
+
+cid_maior <- readxl::read_xlsx("tab_auxiliares/cid10_eurocat.xlsx", sheet = 1)
+
+# cids menores, segundo eurocat
+
+cid_menor <- readxl::read_xlsx("tab_auxiliares/cid10_eurocat.xlsx", sheet = 2)
+
+# classificando malformacao em maior ou menor
+
+d_anom <- d_anom |> 
+  # removendo malformacoes cromossomicas
+  filter(class_malf == "congênita") |> 
+  mutate(
+    malf1 = NA_character_,
+    malf2 = case_when(
+      coda2 %in% cid_maior$categoria_cid10 ~ "maior",
+      coda2 == "Q250" & (def_gestacao == "37 a 41 semanas" | 
+                           def_gestacao == "42 semanas e mais") ~ "maior",
+      coda2 == "Q250" & (!(def_gestacao == "37 a 41 semanas" | 
+                             def_gestacao == "42 semanas e mais")) ~ "menor",
+      coda2 %in% cid_menor$categoria_cid10 ~ "menor",
+      TRUE ~ NA_character_
+    ),
+    malf3 = case_when(
+      coda3 %in% cid_maior$categoria_cid10 ~ "maior",
+      coda3 == "Q250" & (def_gestacao == "37 a 41 semanas" | 
+                           def_gestacao == "42 semanas e mais") ~ "maior",
+      coda3 == "Q250" & (!(def_gestacao == "37 a 41 semanas" | 
+                             def_gestacao == "42 semanas e mais")) ~ "menor",
+      coda3 %in% cid_menor$categoria_cid10 ~ "menor",
+      TRUE ~ NA_character_
+    ),
+    malf4 = case_when(
+      coda4 %in% cid_maior$categoria_cid10 ~ "maior",
+      coda4 == "Q250" & (def_gestacao == "37 a 41 semanas" | 
+                           def_gestacao == "42 semanas e mais") ~ "maior",
+      coda4 == "Q250" & (!(def_gestacao == "37 a 41 semanas" | 
+                             def_gestacao == "42 semanas e mais")) ~ "menor",
+      coda4 %in% cid_menor$categoria_cid10 ~ "menor",
+      TRUE ~ NA_character_
+    ),
+    malf5 = case_when(
+      coda5 %in% cid_maior$categoria_cid10 ~ "maior",
+      coda5 == "Q250" & (def_gestacao == "37 a 41 semanas" | 
+                          def_gestacao == "42 semanas e mais") ~ "maior",
+      coda5 == "Q250" & (!(def_gestacao == "37 a 41 semanas" | 
+                            def_gestacao == "42 semanas e mais")) ~ "menor",
+      coda5 %in% cid_menor$categoria_cid10 ~ "menor",
+      TRUE ~ NA_character_
+    ),
+    malf6 = case_when(
+      coda6 %in% cid_maior$categoria_cid10 ~ "maior",
+      coda6 == "Q250" & (def_gestacao == "37 a 41 semanas" | 
+                           def_gestacao == "42 semanas e mais") ~ "maior",
+      coda6 == "Q250" & (!(def_gestacao == "37 a 41 semanas" | 
+                             def_gestacao == "42 semanas e mais")) ~ "menor",
+      coda6 %in% cid_menor$categoria_cid10 ~ "menor",
+      TRUE ~ NA_character_
+    ),
+    malf7 = case_when(
+      coda7 %in% cid_maior$categoria_cid10 ~ "maior",
+      coda7 == "Q250" & (def_gestacao == "37 a 41 semanas" | 
+                           def_gestacao == "42 semanas e mais") ~ "maior",
+      coda7 == "Q250" & (!(def_gestacao == "37 a 41 semanas" | 
+                             def_gestacao == "42 semanas e mais")) ~ "menor",
+      coda7 %in% cid_menor$categoria_cid10 ~ "menor",
+      TRUE ~ NA_character_
+    )
+  )
+```
+
+### Criando variável indicadora para identificar os RNs classificados com malformação maior única, malformação maior múltipla ou só com malformação menor\*
+
+*\* Única ou múltipla.*
+
+O número total de RNs registrados somente com malformações menores é de 47.493 e o número total de malformações menores desses RNs é de 68.510.
+
+```{r}
+### malformacoes menores ###
+
+dados_malf_men <- d_anom |> 
+  select(malf2, malf3, malf4, malf5, malf6, malf7) |> 
+  # transformando 'menor' em 1 e 'maior' em zero
+  mutate(
+    malf2 = as.numeric(ifelse(malf2 == "menor", 1, 0)),
+    malf3 = as.numeric(ifelse(malf3 == "menor", 1, 0)),
+    malf4 = as.numeric(ifelse(malf4 == "menor", 1, 0)),
+    malf5 = as.numeric(ifelse(malf5 == "menor", 1, 0)),
+    malf6 = as.numeric(ifelse(malf6 == "menor", 1, 0)),
+    malf7 = as.numeric(ifelse(malf7 == "menor", 1, 0))
+  )
+
+# somando as malformacoes menores
+
+n_malf_men <- rowSums(dados_malf_men, na.rm = TRUE)
+
+# incluindo numero de malformacoes menores por nascido
+
+d_anom <- d_anom |> 
+  mutate(n_malf_men = n_malf_men)
+
+### malformacoes maiores ###
+
+dados_malf_maior <- d_anom |> 
+  select(malf2, malf3, malf4, malf5, malf6, malf7) |> 
+  # transformando 'maior' em 1 e 'menor' em zero
+  mutate(
+    malf2 = as.numeric(ifelse(malf2 == "maior", 1, 0)),
+    malf3 = as.numeric(ifelse(malf3 == "maior", 1, 0)),
+    malf4 = as.numeric(ifelse(malf4 == "maior", 1, 0)),
+    malf5 = as.numeric(ifelse(malf5 == "maior", 1, 0)),
+    malf6 = as.numeric(ifelse(malf6 == "maior", 1, 0)),
+    malf7 = as.numeric(ifelse(malf7 == "maior", 1, 0))
+  )
+
+# somando as malformacoes maiores
+
+n_malf_maior <- rowSums(dados_malf_maior, na.rm = TRUE)
+
+# incluindo numero de malformacoes maiores por nascido
+
+d_anom <- d_anom |> 
+  mutate(n_malf_maior = n_malf_maior)
+
+### malformacao maior unica, maior multipla ou so menor ###
+
+d_anom <- d_anom |> 
+  mutate(
+    ind_malf_maior = case_when(
+    n_malf_men >= 1 & n_malf_maior == 0 ~ "só menor",
+    n_malf_men == 0 & n_malf_maior == 1 ~ "única",
+    n_malf_men >= 1 & n_malf_maior >= 1 ~ "múltipla",
+    n_malf_men == 0 & n_malf_maior > 1 ~ "múltipla",
+    TRUE ~ NA_character_
+   )
+ )
+```
+
+### Incluindo o número de malformações e as CIDs agrupadas, segundo a EUROCAT
+
+```{r}
+# soma e cids, segundo a eurocat
+
+soma_cids_malf <- readRDS("soma_auxiliar/soma_cids.rds")
+
+# vetor de somas de malformacoes
+
+soma <- unlist(soma_cids_malf$soma)
+
+# vetores de cids das malformacoes
+
+cids <- matrix(
+  unlist(soma_cids_malf$cids),
+  ncol = 6, byrow = TRUE
+ ) |> 
+  as.data.frame()
+
+# incluindo contagem e cids agrupadas de malformacoes
+
+d_anom <- d_anom |> 
+  # removendo malformacoes menores
+  filter(ind_malf_maior != "só menor") |>
+  mutate(
+    n_malf = as.numeric(soma),
+    cid2 = cids$V1,
+    cid3 = cids$V2,
+    cid4 = cids$V3,
+    cid5 = cids$V4,
+    cid6 = cids$V5,
+    cid7 = cids$V6,
+  ) |> 
+  # identificando se a malformacao e unica ou multipla
+  mutate(
+    ind_malf = case_when(
+      n_malf == 1 ~ "única",
+      n_malf > 1 ~ "múltipla",
+      TRUE ~ NA_character_
+    )
+  ) |>
+  # corrigindo soma de malformacoes
+  mutate(
+    n_malf = case_when(
+      cid3 == "NA-Q742" ~ 2, cid3 == "NA-Q369" ~ 3, cid3 == "NA-Q220" ~ 4,
+      cid3 == "NA-Q059" & cid6 == "Q410" ~ 3, cid3 == "NA-Q059" & cid5 == "Q208" ~ 4,
+      cid3 == "NA-Q059" & cid5 == "Q668" ~ 3 , cid3 == "NA-Q050" & cid5 == "Q753" ~ 3,
+      cid3 == "NA-Q040-Q042" ~ 3, cid4 == "NA-Q647" & cid6 == "Q699" ~ 4,
+      cid4 == "NA-Q647" & cid2 == "Q272" ~ 3, cid4 == "NA-742" ~ 3, cid5 == "NA-742" ~ 4,
+      TRUE ~ n_malf
+    )
+  ) |>
+  # corrigindo cids
+  mutate(
+    cid2 = case_when(
+      cid3 == "NA-Q079" ~ "Q040-Q078-Q079",
+      TRUE ~ cid2
+    ),
+    cid3 = case_when(
+      cid3 == "NA-Q079" ~ NA_character_,
+      TRUE ~ cid3
+    )
+  ) |>
+  mutate(across(starts_with("cid"), ~ifelse(str_detect(.x, "NA"), str_sub(.x, start = 4), .x)))
+```
+
+### Classificando CIDs múltiplas em uma única CID, segundo o agrupamento da EUROCAT
+
+Código omitido.
+
+```{r echo=FALSE}
+# classificando cids multiplas em uma unica cid, segundo a eurocat
+d_anom <- d_anom |>
+  mutate(
+    # cid2
+    cf2 = case_when(
+      str_length(cid2) > 4 & str_detect(cid2, "Q000") ~ "Q000",
+      str_length(cid2) > 4 & str_detect(cid2, "Q01X") ~ "Q01X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q02X") ~ "Q02X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q039") ~ "Q039",
+      str_length(cid2) > 4 & str_detect(cid2, "Q040") ~ "Q040",
+      str_length(cid2) > 4 & str_detect(cid2, "Q042") ~ "Q042",
+      str_length(cid2) > 4 & str_detect(cid2, "Q045") ~ "Q045",
+      str_length(cid2) > 4 & str_detect(cid2, "Q046") ~ "Q046",
+      str_length(cid2) > 4 & str_detect(cid2, "Q05X") ~ "Q05X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q01X") ~ "Q01X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q060") ~ "Q060",
+      str_length(cid2) > 4 & str_detect(cid2, "Q062") ~ "Q062",
+      str_length(cid2) > 4 & str_detect(cid2, "Q064") ~ "Q064",
+      str_length(cid2) > 4 & str_detect(cid2, "Q104") ~ "Q104",
+      str_length(cid2) > 4 & str_detect(cid2, "Q110") ~ "Q110",
+      str_length(cid2) > 4 & str_detect(cid2, "Q111") ~ "Q111",
+      str_length(cid2) > 4 & str_detect(cid2, "Q112") ~ "Q112",
+      str_length(cid2) > 4 & str_detect(cid2, "Q113") ~ "Q120",
+      str_length(cid2) > 4 & str_detect(cid2, "Q132") ~ "Q132",
+      str_length(cid2) > 4 & str_detect(cid2, "Q150") ~ "Q150",
+      str_length(cid2) > 4 & str_detect(cid2, "Q160") ~ "Q160",
+      str_length(cid2) > 4 & str_detect(cid2, "Q200") ~ "Q200",
+      str_length(cid2) > 4 & str_detect(cid2, "Q201") ~ "Q201",
+      str_length(cid2) > 4 & str_detect(cid2, "Q202") ~ "Q202",
+      str_length(cid2) > 4 & str_detect(cid2, "Q203") ~ "Q203",
+      str_length(cid2) > 4 & str_detect(cid2, "Q204") ~ "Q204",
+      str_length(cid2) > 4 & str_detect(cid2, "Q205") ~ "Q205",
+      str_length(cid2) > 4 & str_detect(cid2, "Q206") ~ "Q206",
+      str_length(cid2) > 4 & str_detect(cid2, "Q210") ~ "Q210",
+      str_length(cid2) > 4 & str_detect(cid2, "Q211") ~ "Q211",
+      str_length(cid2) > 4 & str_detect(cid2, "Q212") ~ "Q212",
+      str_length(cid2) > 4 & str_detect(cid2, "Q213") ~ "Q213",
+      str_length(cid2) > 4 & str_detect(cid2, "Q214") ~ "Q214",
+      str_length(cid2) > 4 & str_detect(cid2, "Q220") ~ "Q220",
+      str_length(cid2) > 4 & str_detect(cid2, "Q224") ~ "Q224",
+      str_length(cid2) > 4 & str_detect(cid2, "Q230") ~ "Q230",
+      str_length(cid2) > 4 & str_detect(cid2, "Q240") ~ "Q240",
+      str_length(cid2) > 4 & str_detect(cid2, "Q242") ~ "Q242",
+      str_length(cid2) > 4 & str_detect(cid2, "Q243") ~ "Q243",
+      str_length(cid2) > 4 & str_detect(cid2, "Q244") ~ "Q244",
+      str_length(cid2) > 4 & str_detect(cid2, "Q245") ~ "Q245",
+      str_length(cid2) > 4 & str_detect(cid2, "Q251") ~ "Q251",
+      str_length(cid2) > 4 & str_detect(cid2, "Q255") ~ "Q255",
+      str_length(cid2) > 4 & str_detect(cid2, "Q260") ~ "Q260",
+      str_length(cid2) > 4 & str_detect(cid2, "Q262") ~ "Q262",
+      str_length(cid2) > 4 & str_detect(cid2, "Q265") ~ "Q265",
+      str_length(cid2) > 4 & str_detect(cid2, "Q266") ~ "Q266",
+      str_length(cid2) > 4 & str_detect(cid2, "Q300") ~ "Q300",
+      str_length(cid2) > 4 & str_detect(cid2, "Q301") ~ "Q301",
+      str_length(cid2) > 4 & str_detect(cid2, "Q302") ~ "Q302",
+      str_length(cid2) > 4 & str_detect(cid2, "Q313") ~ "Q313",
+      str_length(cid2) > 4 & str_detect(cid2, "Q322") ~ "Q322",
+      str_length(cid2) > 4 & str_detect(cid2, "Q323") ~ "Q323",
+      str_length(cid2) > 4 & str_detect(cid2, "Q330") ~ "Q330",
+      str_length(cid2) > 4 & str_detect(cid2, "Q332") ~ "Q332",
+      str_length(cid2) > 4 & str_detect(cid2, "Q333") ~ "Q333",
+      str_length(cid2) > 4 & str_detect(cid2, "Q334") ~ "Q334",
+      str_length(cid2) > 4 & str_detect(cid2, "Q335") ~ "Q335",
+      str_length(cid2) > 4 & str_detect(cid2, "Q336") ~ "Q336",
+      str_length(cid2) > 4 & str_detect(cid2, "Q340") ~ "Q340",
+      str_length(cid2) > 4 & str_detect(cid2, "Q790") ~ "Q790",
+      str_length(cid2) > 4 & str_detect(cid2, "Q35X") ~ "Q35X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q042") ~ "Q042",
+      str_length(cid2) > 4 & str_detect(cid2, "Q37X") ~ "Q37X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q042") ~ "Q042",
+      str_length(cid2) > 4 & str_detect(cid2, "Q383") ~ "Q383",
+      str_length(cid2) > 4 & str_detect(cid2, "Q384") ~ "Q383",
+      str_length(cid2) > 4 & str_detect(cid2, "Q387") ~ "Q387",
+      str_length(cid2) > 4 & str_detect(cid2, "Q390") ~ "Q390",
+      str_length(cid2) > 4 & str_detect(cid2, "Q391") ~ "Q391",
+      str_length(cid2) > 4 & str_detect(cid2, "Q392") ~ "Q392",
+      str_length(cid2) > 4 & str_detect(cid2, "Q393") ~ "Q393",
+      str_length(cid2) > 4 & str_detect(cid2, "Q396") ~ "Q396",
+      str_length(cid2) > 4 & str_detect(cid2, "Q403") ~ "Q403",
+      str_length(cid2) > 4 & str_detect(cid2, "Q410") ~ "Q410",
+      str_length(cid2) > 4 & str_detect(cid2, "Q423") ~ "Q423",
+      str_length(cid2) > 4 & str_detect(cid2, "Q428") ~ "Q428",
+      str_length(cid2) > 4 & str_detect(cid2, "Q431") ~ "Q431",
+      str_length(cid2) > 4 & str_detect(cid2, "Q433") ~ "Q433",
+      str_length(cid2) > 4 & str_detect(cid2, "Q434") ~ "Q434",
+      str_length(cid2) > 4 & str_detect(cid2, "Q435") ~ "Q435",
+      str_length(cid2) > 4 & str_detect(cid2, "Q436") ~ "Q436",
+      str_length(cid2) > 4 & str_detect(cid2, "Q440") ~ "Q440",
+      str_length(cid2) > 4 & str_detect(cid2, "Q442") ~ "Q442",
+      str_length(cid2) > 4 & str_detect(cid2, "Q446") ~ "Q446",
+      str_length(cid2) > 4 & str_detect(cid2, "Q451") ~ "Q451",
+      str_length(cid2) > 4 & str_detect(cid2, "Q422") ~ "Q422",
+      str_length(cid2) > 4 & str_detect(cid2, "Q500") ~ "Q500",
+      str_length(cid2) > 4 & str_detect(cid2, "Q501") ~ "Q501",
+      str_length(cid2) > 4 & str_detect(cid2, "Q502") ~ "Q502",
+      str_length(cid2) > 4 & str_detect(cid2, "Q505") ~ "Q505",
+      str_length(cid2) > 4 & str_detect(cid2, "Q510") ~ "Q510",
+      str_length(cid2) > 4 & str_detect(cid2, "Q513") ~ "Q513",
+      str_length(cid2) > 4 & str_detect(cid2, "Q516") ~ "Q516",
+      str_length(cid2) > 4 & str_detect(cid2, "Q517") ~ "Q517",
+      str_length(cid2) > 4 & str_detect(cid2, "Q520") ~ "Q520",
+      str_length(cid2) > 4 & str_detect(cid2, "Q521") ~ "Q521",
+      str_length(cid2) > 4 & str_detect(cid2, "Q522") ~ "Q522",
+      str_length(cid2) > 4 & str_detect(cid2, "Q526") ~ "Q526",
+      str_length(cid2) > 4 & str_detect(cid2, "Q527") ~ "Q527",
+      str_length(cid2) > 4 & str_detect(cid2, "Q549") ~ "Q549",
+      str_length(cid2) > 4 & str_detect(cid2, "Q550") ~ "Q550",
+      str_length(cid2) > 4 & str_detect(cid2, "Q553") ~ "Q553",
+      str_length(cid2) > 4 & str_detect(cid2, "Q555") ~ "Q555",
+      str_length(cid2) > 4 & str_detect(cid2, "Q560") ~ "Q560",
+      str_length(cid2) > 4 & str_detect(cid2, "Q600") ~ "Q600",
+      str_length(cid2) > 4 & str_detect(cid2, "Q601") ~ "Q601",
+      str_length(cid2) > 4 & str_detect(cid2, "Q603") ~ "Q603",
+      str_length(cid2) > 4 & str_detect(cid2, "Q604") ~ "Q604",
+      str_length(cid2) > 4 & str_detect(cid2, "Q613") ~ "Q613",
+      str_length(cid2) > 4 & str_detect(cid2, "Q614") ~ "Q614",
+      str_length(cid2) > 4 & str_detect(cid2, "Q620") ~ "Q620",
+      str_length(cid2) > 4 & str_detect(cid2, "Q624") ~ "Q624",
+      str_length(cid2) > 4 & str_detect(cid2, "Q625") ~ "Q625",
+      str_length(cid2) > 4 & str_detect(cid2, "Q630") ~ "Q630",
+      str_length(cid2) > 4 & str_detect(cid2, "Q631") ~ "Q631",
+      str_length(cid2) > 4 & str_detect(cid2, "Q632") ~ "Q632",
+      str_length(cid2) > 4 & str_detect(cid2, "Q640") ~ "Q640",
+      str_length(cid2) > 4 & str_detect(cid2, "Q641") ~ "Q642",
+      str_length(cid2) > 4 & str_detect(cid2, "Q644") ~ "Q645",
+      str_length(cid2) > 4 & str_detect(cid2, "Q646") ~ "Q646",
+      str_length(cid2) > 4 & str_detect(cid2, "Q652") ~ "Q652",
+      str_length(cid2) > 4 & str_detect(cid2, "Q66X") ~ "Q66X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q69X") ~ "Q69X",
+      str_length(cid2) > 4 & str_detect(cid2, "Q709") ~ "Q709",
+      str_length(cid2) > 4 & str_detect(cid2, "Q716") ~ "Q716",
+      str_length(cid2) > 4 & str_detect(cid2, "Q718") ~ "Q718",
+      str_length(cid2) > 4 & str_detect(cid2, "Q728") ~ "Q728",
+      str_length(cid2) > 4 & str_detect(cid2, "Q743") ~ "Q743",
+      str_length(cid2) > 4 & str_detect(cid2, "Q750") ~ "Q750",
+      str_length(cid2) > 4 & str_detect(cid2, "Q751") ~ "Q751",
+      str_length(cid2) > 4 & str_detect(cid2, "Q770") ~ "Q770",
+      str_length(cid2) > 4 & str_detect(cid2, "Q771") ~ "Q771",
+      str_length(cid2) > 4 & str_detect(cid2, "Q772") ~ "Q772",
+      str_length(cid2) > 4 & str_detect(cid2, "Q773") ~ "Q773",
+      str_length(cid2) > 4 & str_detect(cid2, "Q775") ~ "Q775",
+      str_length(cid2) > 4 & str_detect(cid2, "Q776") ~ "Q776",
+      str_length(cid2) > 4 & str_detect(cid2, "Q777") ~ "Q777",
+      str_length(cid2) > 4 & str_detect(cid2, "Q780") ~ "Q780",
+      str_length(cid2) > 4 & str_detect(cid2, "Q781") ~ "Q781",
+      str_length(cid2) > 4 & str_detect(cid2, "Q782") ~ "Q782",
+      str_length(cid2) > 4 & str_detect(cid2, "Q783") ~ "Q783",
+      str_length(cid2) > 4 & str_detect(cid2, "Q784") ~ "Q784",
+      str_length(cid2) > 4 & str_detect(cid2, "Q785") ~ "Q785",
+      str_length(cid2) > 4 & str_detect(cid2, "Q786") ~ "Q786",
+      str_length(cid2) > 4 & str_detect(cid2, "Q792") ~ "Q792",
+      str_length(cid2) > 4 & str_detect(cid2, "Q793") ~ "Q793",
+      str_length(cid2) > 4 & str_detect(cid2, "Q794") ~ "Q794",
+      str_length(cid2) > 4 & str_detect(cid2, "Q809") ~ "Q809",
+      str_length(cid2) > 4 & str_detect(cid2, "Q819") ~ "Q819",
+      str_length(cid2) > 4 & str_detect(cid2, "Q820") ~ "Q820",
+      str_length(cid2) > 4 & str_detect(cid2, "Q821") ~ "Q821",
+      str_length(cid2) > 4 & str_detect(cid2, "Q822") ~ "Q822",
+      str_length(cid2) > 4 & str_detect(cid2, "Q823") ~ "Q823",
+      str_length(cid2) > 4 & str_detect(cid2, "Q824") ~ "Q824",
+      str_length(cid2) > 4 & str_detect(cid2, "Q860") ~ "Q860",
+      str_length(cid2) > 4 & str_detect(cid2, "Q861") ~ "Q861",
+      str_length(cid2) > 4 & str_detect(cid2, "Q862") ~ "Q862",
+      TRUE ~ cid2
+    ),
+    # cid3
+    cf3 = case_when(
+      str_length(cid3) > 4 & str_detect(cid3, "Q000") ~ "Q000",
+      str_length(cid3) > 4 & str_detect(cid3, "Q01X") ~ "Q01X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q02X") ~ "Q02X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q039") ~ "Q039",
+      str_length(cid3) > 4 & str_detect(cid3, "Q040") ~ "Q040",
+      str_length(cid3) > 4 & str_detect(cid3, "Q042") ~ "Q042",
+      str_length(cid3) > 4 & str_detect(cid3, "Q045") ~ "Q045",
+      str_length(cid3) > 4 & str_detect(cid3, "Q046") ~ "Q046",
+      str_length(cid3) > 4 & str_detect(cid3, "Q05X") ~ "Q05X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q01X") ~ "Q01X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q060") ~ "Q060",
+      str_length(cid3) > 4 & str_detect(cid3, "Q062") ~ "Q062",
+      str_length(cid3) > 4 & str_detect(cid3, "Q064") ~ "Q064",
+      str_length(cid3) > 4 & str_detect(cid3, "Q104") ~ "Q104",
+      str_length(cid3) > 4 & str_detect(cid3, "Q110") ~ "Q110",
+      str_length(cid3) > 4 & str_detect(cid3, "Q111") ~ "Q111",
+      str_length(cid3) > 4 & str_detect(cid3, "Q112") ~ "Q112",
+      str_length(cid3) > 4 & str_detect(cid3, "Q113") ~ "Q120",
+      str_length(cid3) > 4 & str_detect(cid3, "Q132") ~ "Q132",
+      str_length(cid3) > 4 & str_detect(cid3, "Q150") ~ "Q150",
+      str_length(cid3) > 4 & str_detect(cid3, "Q160") ~ "Q160",
+      str_length(cid3) > 4 & str_detect(cid3, "Q200") ~ "Q200",
+      str_length(cid3) > 4 & str_detect(cid3, "Q201") ~ "Q201",
+      str_length(cid3) > 4 & str_detect(cid3, "Q202") ~ "Q202",
+      str_length(cid3) > 4 & str_detect(cid3, "Q203") ~ "Q203",
+      str_length(cid3) > 4 & str_detect(cid3, "Q204") ~ "Q204",
+      str_length(cid3) > 4 & str_detect(cid3, "Q205") ~ "Q205",
+      str_length(cid3) > 4 & str_detect(cid3, "Q206") ~ "Q206",
+      str_length(cid3) > 4 & str_detect(cid3, "Q210") ~ "Q210",
+      str_length(cid3) > 4 & str_detect(cid3, "Q211") ~ "Q211",
+      str_length(cid3) > 4 & str_detect(cid3, "Q212") ~ "Q212",
+      str_length(cid3) > 4 & str_detect(cid3, "Q213") ~ "Q213",
+      str_length(cid3) > 4 & str_detect(cid3, "Q214") ~ "Q214",
+      str_length(cid3) > 4 & str_detect(cid3, "Q220") ~ "Q220",
+      str_length(cid3) > 4 & str_detect(cid3, "Q224") ~ "Q224",
+      str_length(cid3) > 4 & str_detect(cid3, "Q230") ~ "Q230",
+      str_length(cid3) > 4 & str_detect(cid3, "Q240") ~ "Q240",
+      str_length(cid3) > 4 & str_detect(cid3, "Q242") ~ "Q242",
+      str_length(cid3) > 4 & str_detect(cid3, "Q243") ~ "Q243",
+      str_length(cid3) > 4 & str_detect(cid3, "Q244") ~ "Q244",
+      str_length(cid3) > 4 & str_detect(cid3, "Q245") ~ "Q245",
+      str_length(cid3) > 4 & str_detect(cid3, "Q251") ~ "Q251",
+      str_length(cid3) > 4 & str_detect(cid3, "Q255") ~ "Q255",
+      str_length(cid3) > 4 & str_detect(cid3, "Q260") ~ "Q260",
+      str_length(cid3) > 4 & str_detect(cid3, "Q262") ~ "Q262",
+      str_length(cid3) > 4 & str_detect(cid3, "Q265") ~ "Q265",
+      str_length(cid3) > 4 & str_detect(cid3, "Q266") ~ "Q266",
+      str_length(cid3) > 4 & str_detect(cid3, "Q300") ~ "Q300",
+      str_length(cid3) > 4 & str_detect(cid3, "Q301") ~ "Q301",
+      str_length(cid3) > 4 & str_detect(cid3, "Q302") ~ "Q302",
+      str_length(cid3) > 4 & str_detect(cid3, "Q313") ~ "Q313",
+      str_length(cid3) > 4 & str_detect(cid3, "Q322") ~ "Q322",
+      str_length(cid3) > 4 & str_detect(cid3, "Q323") ~ "Q323",
+      str_length(cid3) > 4 & str_detect(cid3, "Q330") ~ "Q330",
+      str_length(cid3) > 4 & str_detect(cid3, "Q332") ~ "Q332",
+      str_length(cid3) > 4 & str_detect(cid3, "Q333") ~ "Q333",
+      str_length(cid3) > 4 & str_detect(cid3, "Q334") ~ "Q334",
+      str_length(cid3) > 4 & str_detect(cid3, "Q335") ~ "Q335",
+      str_length(cid3) > 4 & str_detect(cid3, "Q336") ~ "Q336",
+      str_length(cid3) > 4 & str_detect(cid3, "Q340") ~ "Q340",
+      str_length(cid3) > 4 & str_detect(cid3, "Q790") ~ "Q790",
+      str_length(cid3) > 4 & str_detect(cid3, "Q35X") ~ "Q35X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q042") ~ "Q042",
+      str_length(cid3) > 4 & str_detect(cid3, "Q37X") ~ "Q37X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q042") ~ "Q042",
+      str_length(cid3) > 4 & str_detect(cid3, "Q383") ~ "Q383",
+      str_length(cid3) > 4 & str_detect(cid3, "Q384") ~ "Q383",
+      str_length(cid3) > 4 & str_detect(cid3, "Q387") ~ "Q387",
+      str_length(cid3) > 4 & str_detect(cid3, "Q390") ~ "Q390",
+      str_length(cid3) > 4 & str_detect(cid3, "Q391") ~ "Q391",
+      str_length(cid3) > 4 & str_detect(cid3, "Q392") ~ "Q392",
+      str_length(cid3) > 4 & str_detect(cid3, "Q393") ~ "Q393",
+      str_length(cid3) > 4 & str_detect(cid3, "Q396") ~ "Q396",
+      str_length(cid3) > 4 & str_detect(cid3, "Q403") ~ "Q403",
+      str_length(cid3) > 4 & str_detect(cid3, "Q410") ~ "Q410",
+      str_length(cid3) > 4 & str_detect(cid3, "Q423") ~ "Q423",
+      str_length(cid3) > 4 & str_detect(cid3, "Q428") ~ "Q428",
+      str_length(cid3) > 4 & str_detect(cid3, "Q431") ~ "Q431",
+      str_length(cid3) > 4 & str_detect(cid3, "Q433") ~ "Q433",
+      str_length(cid3) > 4 & str_detect(cid3, "Q434") ~ "Q434",
+      str_length(cid3) > 4 & str_detect(cid3, "Q435") ~ "Q435",
+      str_length(cid3) > 4 & str_detect(cid3, "Q436") ~ "Q436",
+      str_length(cid3) > 4 & str_detect(cid3, "Q440") ~ "Q440",
+      str_length(cid3) > 4 & str_detect(cid3, "Q442") ~ "Q442",
+      str_length(cid3) > 4 & str_detect(cid3, "Q446") ~ "Q446",
+      str_length(cid3) > 4 & str_detect(cid3, "Q451") ~ "Q451",
+      str_length(cid3) > 4 & str_detect(cid3, "Q422") ~ "Q422",
+      str_length(cid3) > 4 & str_detect(cid3, "Q500") ~ "Q500",
+      str_length(cid3) > 4 & str_detect(cid3, "Q501") ~ "Q501",
+      str_length(cid3) > 4 & str_detect(cid3, "Q502") ~ "Q502",
+      str_length(cid3) > 4 & str_detect(cid3, "Q505") ~ "Q505",
+      str_length(cid3) > 4 & str_detect(cid3, "Q510") ~ "Q510",
+      str_length(cid3) > 4 & str_detect(cid3, "Q513") ~ "Q513",
+      str_length(cid3) > 4 & str_detect(cid3, "Q516") ~ "Q516",
+      str_length(cid3) > 4 & str_detect(cid3, "Q517") ~ "Q517",
+      str_length(cid3) > 4 & str_detect(cid3, "Q520") ~ "Q520",
+      str_length(cid3) > 4 & str_detect(cid3, "Q521") ~ "Q521",
+      str_length(cid3) > 4 & str_detect(cid3, "Q522") ~ "Q522",
+      str_length(cid3) > 4 & str_detect(cid3, "Q526") ~ "Q526",
+      str_length(cid3) > 4 & str_detect(cid3, "Q527") ~ "Q527",
+      str_length(cid3) > 4 & str_detect(cid3, "Q549") ~ "Q549",
+      str_length(cid3) > 4 & str_detect(cid3, "Q550") ~ "Q550",
+      str_length(cid3) > 4 & str_detect(cid3, "Q553") ~ "Q553",
+      str_length(cid3) > 4 & str_detect(cid3, "Q555") ~ "Q555",
+      str_length(cid3) > 4 & str_detect(cid3, "Q560") ~ "Q560",
+      str_length(cid3) > 4 & str_detect(cid3, "Q600") ~ "Q600",
+      str_length(cid3) > 4 & str_detect(cid3, "Q601") ~ "Q601",
+      str_length(cid3) > 4 & str_detect(cid3, "Q603") ~ "Q603",
+      str_length(cid3) > 4 & str_detect(cid3, "Q604") ~ "Q604",
+      str_length(cid3) > 4 & str_detect(cid3, "Q613") ~ "Q613",
+      str_length(cid3) > 4 & str_detect(cid3, "Q614") ~ "Q614",
+      str_length(cid3) > 4 & str_detect(cid3, "Q620") ~ "Q620",
+      str_length(cid3) > 4 & str_detect(cid3, "Q624") ~ "Q624",
+      str_length(cid3) > 4 & str_detect(cid3, "Q625") ~ "Q625",
+      str_length(cid3) > 4 & str_detect(cid3, "Q630") ~ "Q630",
+      str_length(cid3) > 4 & str_detect(cid3, "Q631") ~ "Q631",
+      str_length(cid3) > 4 & str_detect(cid3, "Q632") ~ "Q632",
+      str_length(cid3) > 4 & str_detect(cid3, "Q640") ~ "Q640",
+      str_length(cid3) > 4 & str_detect(cid3, "Q641") ~ "Q642",
+      str_length(cid3) > 4 & str_detect(cid3, "Q644") ~ "Q645",
+      str_length(cid3) > 4 & str_detect(cid3, "Q646") ~ "Q646",
+      str_length(cid3) > 4 & str_detect(cid3, "Q652") ~ "Q652",
+      str_length(cid3) > 4 & str_detect(cid3, "Q66X") ~ "Q66X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q69X") ~ "Q69X",
+      str_length(cid3) > 4 & str_detect(cid3, "Q709") ~ "Q709",
+      str_length(cid3) > 4 & str_detect(cid3, "Q716") ~ "Q716",
+      str_length(cid3) > 4 & str_detect(cid3, "Q718") ~ "Q718",
+      str_length(cid3) > 4 & str_detect(cid3, "Q728") ~ "Q728",
+      str_length(cid3) > 4 & str_detect(cid3, "Q743") ~ "Q743",
+      str_length(cid3) > 4 & str_detect(cid3, "Q750") ~ "Q750",
+      str_length(cid3) > 4 & str_detect(cid3, "Q751") ~ "Q751",
+      str_length(cid3) > 4 & str_detect(cid3, "Q770") ~ "Q770",
+      str_length(cid3) > 4 & str_detect(cid3, "Q771") ~ "Q771",
+      str_length(cid3) > 4 & str_detect(cid3, "Q772") ~ "Q772",
+      str_length(cid3) > 4 & str_detect(cid3, "Q773") ~ "Q773",
+      str_length(cid3) > 4 & str_detect(cid3, "Q775") ~ "Q775",
+      str_length(cid3) > 4 & str_detect(cid3, "Q776") ~ "Q776",
+      str_length(cid3) > 4 & str_detect(cid3, "Q777") ~ "Q777",
+      str_length(cid3) > 4 & str_detect(cid3, "Q780") ~ "Q780",
+      str_length(cid3) > 4 & str_detect(cid3, "Q781") ~ "Q781",
+      str_length(cid3) > 4 & str_detect(cid3, "Q782") ~ "Q782",
+      str_length(cid3) > 4 & str_detect(cid3, "Q783") ~ "Q783",
+      str_length(cid3) > 4 & str_detect(cid3, "Q784") ~ "Q784",
+      str_length(cid3) > 4 & str_detect(cid3, "Q785") ~ "Q785",
+      str_length(cid3) > 4 & str_detect(cid3, "Q786") ~ "Q786",
+      str_length(cid3) > 4 & str_detect(cid3, "Q792") ~ "Q792",
+      str_length(cid3) > 4 & str_detect(cid3, "Q793") ~ "Q793",
+      str_length(cid3) > 4 & str_detect(cid3, "Q794") ~ "Q794",
+      str_length(cid3) > 4 & str_detect(cid3, "Q809") ~ "Q809",
+      str_length(cid3) > 4 & str_detect(cid3, "Q819") ~ "Q819",
+      str_length(cid3) > 4 & str_detect(cid3, "Q820") ~ "Q820",
+      str_length(cid3) > 4 & str_detect(cid3, "Q821") ~ "Q821",
+      str_length(cid3) > 4 & str_detect(cid3, "Q822") ~ "Q822",
+      str_length(cid3) > 4 & str_detect(cid3, "Q823") ~ "Q823",
+      str_length(cid3) > 4 & str_detect(cid3, "Q824") ~ "Q824",
+      str_length(cid3) > 4 & str_detect(cid3, "Q860") ~ "Q860",
+      str_length(cid3) > 4 & str_detect(cid3, "Q861") ~ "Q861",
+      str_length(cid3) > 4 & str_detect(cid3, "Q862") ~ "Q862",
+      TRUE ~ cid3
+    ),
+    # cid4
+    cf4 = case_when(
+      str_length(cid4) > 4 & str_detect(cid4, "Q000") ~ "Q000",
+      str_length(cid4) > 4 & str_detect(cid4, "Q01X") ~ "Q01X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q02X") ~ "Q02X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q039") ~ "Q039",
+      str_length(cid4) > 4 & str_detect(cid4, "Q040") ~ "Q040",
+      str_length(cid4) > 4 & str_detect(cid4, "Q042") ~ "Q042",
+      str_length(cid4) > 4 & str_detect(cid4, "Q045") ~ "Q045",
+      str_length(cid4) > 4 & str_detect(cid4, "Q046") ~ "Q046",
+      str_length(cid4) > 4 & str_detect(cid4, "Q05X") ~ "Q05X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q01X") ~ "Q01X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q060") ~ "Q060",
+      str_length(cid4) > 4 & str_detect(cid4, "Q062") ~ "Q062",
+      str_length(cid4) > 4 & str_detect(cid4, "Q064") ~ "Q064",
+      str_length(cid4) > 4 & str_detect(cid4, "Q104") ~ "Q104",
+      str_length(cid4) > 4 & str_detect(cid4, "Q110") ~ "Q110",
+      str_length(cid4) > 4 & str_detect(cid4, "Q111") ~ "Q111",
+      str_length(cid4) > 4 & str_detect(cid4, "Q112") ~ "Q112",
+      str_length(cid4) > 4 & str_detect(cid4, "Q113") ~ "Q120",
+      str_length(cid4) > 4 & str_detect(cid4, "Q132") ~ "Q132",
+      str_length(cid4) > 4 & str_detect(cid4, "Q150") ~ "Q150",
+      str_length(cid4) > 4 & str_detect(cid4, "Q160") ~ "Q160",
+      str_length(cid4) > 4 & str_detect(cid4, "Q200") ~ "Q200",
+      str_length(cid4) > 4 & str_detect(cid4, "Q201") ~ "Q201",
+      str_length(cid4) > 4 & str_detect(cid4, "Q202") ~ "Q202",
+      str_length(cid4) > 4 & str_detect(cid4, "Q203") ~ "Q203",
+      str_length(cid4) > 4 & str_detect(cid4, "Q204") ~ "Q204",
+      str_length(cid4) > 4 & str_detect(cid4, "Q205") ~ "Q205",
+      str_length(cid4) > 4 & str_detect(cid4, "Q206") ~ "Q206",
+      str_length(cid4) > 4 & str_detect(cid4, "Q210") ~ "Q210",
+      str_length(cid4) > 4 & str_detect(cid4, "Q211") ~ "Q211",
+      str_length(cid4) > 4 & str_detect(cid4, "Q212") ~ "Q212",
+      str_length(cid4) > 4 & str_detect(cid4, "Q213") ~ "Q213",
+      str_length(cid4) > 4 & str_detect(cid4, "Q214") ~ "Q214",
+      str_length(cid4) > 4 & str_detect(cid4, "Q220") ~ "Q220",
+      str_length(cid4) > 4 & str_detect(cid4, "Q224") ~ "Q224",
+      str_length(cid4) > 4 & str_detect(cid4, "Q230") ~ "Q230",
+      str_length(cid4) > 4 & str_detect(cid4, "Q240") ~ "Q240",
+      str_length(cid4) > 4 & str_detect(cid4, "Q242") ~ "Q242",
+      str_length(cid4) > 4 & str_detect(cid4, "Q243") ~ "Q243",
+      str_length(cid4) > 4 & str_detect(cid4, "Q244") ~ "Q244",
+      str_length(cid4) > 4 & str_detect(cid4, "Q245") ~ "Q245",
+      str_length(cid4) > 4 & str_detect(cid4, "Q251") ~ "Q251",
+      str_length(cid4) > 4 & str_detect(cid4, "Q255") ~ "Q255",
+      str_length(cid4) > 4 & str_detect(cid4, "Q260") ~ "Q260",
+      str_length(cid4) > 4 & str_detect(cid4, "Q262") ~ "Q262",
+      str_length(cid4) > 4 & str_detect(cid4, "Q265") ~ "Q265",
+      str_length(cid4) > 4 & str_detect(cid4, "Q266") ~ "Q266",
+      str_length(cid4) > 4 & str_detect(cid4, "Q300") ~ "Q300",
+      str_length(cid4) > 4 & str_detect(cid4, "Q301") ~ "Q301",
+      str_length(cid4) > 4 & str_detect(cid4, "Q302") ~ "Q302",
+      str_length(cid4) > 4 & str_detect(cid4, "Q313") ~ "Q313",
+      str_length(cid4) > 4 & str_detect(cid4, "Q322") ~ "Q322",
+      str_length(cid4) > 4 & str_detect(cid4, "Q323") ~ "Q323",
+      str_length(cid4) > 4 & str_detect(cid4, "Q330") ~ "Q330",
+      str_length(cid4) > 4 & str_detect(cid4, "Q332") ~ "Q332",
+      str_length(cid4) > 4 & str_detect(cid4, "Q333") ~ "Q333",
+      str_length(cid4) > 4 & str_detect(cid4, "Q334") ~ "Q334",
+      str_length(cid4) > 4 & str_detect(cid4, "Q335") ~ "Q335",
+      str_length(cid4) > 4 & str_detect(cid4, "Q336") ~ "Q336",
+      str_length(cid4) > 4 & str_detect(cid4, "Q340") ~ "Q340",
+      str_length(cid4) > 4 & str_detect(cid4, "Q790") ~ "Q790",
+      str_length(cid4) > 4 & str_detect(cid4, "Q35X") ~ "Q35X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q042") ~ "Q042",
+      str_length(cid4) > 4 & str_detect(cid4, "Q37X") ~ "Q37X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q042") ~ "Q042",
+      str_length(cid4) > 4 & str_detect(cid4, "Q383") ~ "Q383",
+      str_length(cid4) > 4 & str_detect(cid4, "Q384") ~ "Q383",
+      str_length(cid4) > 4 & str_detect(cid4, "Q387") ~ "Q387",
+      str_length(cid4) > 4 & str_detect(cid4, "Q390") ~ "Q390",
+      str_length(cid4) > 4 & str_detect(cid4, "Q391") ~ "Q391",
+      str_length(cid4) > 4 & str_detect(cid4, "Q392") ~ "Q392",
+      str_length(cid4) > 4 & str_detect(cid4, "Q393") ~ "Q393",
+      str_length(cid4) > 4 & str_detect(cid4, "Q396") ~ "Q396",
+      str_length(cid4) > 4 & str_detect(cid4, "Q403") ~ "Q403",
+      str_length(cid4) > 4 & str_detect(cid4, "Q410") ~ "Q410",
+      str_length(cid4) > 4 & str_detect(cid4, "Q423") ~ "Q423",
+      str_length(cid4) > 4 & str_detect(cid4, "Q428") ~ "Q428",
+      str_length(cid4) > 4 & str_detect(cid4, "Q431") ~ "Q431",
+      str_length(cid4) > 4 & str_detect(cid4, "Q433") ~ "Q433",
+      str_length(cid4) > 4 & str_detect(cid4, "Q434") ~ "Q434",
+      str_length(cid4) > 4 & str_detect(cid4, "Q435") ~ "Q435",
+      str_length(cid4) > 4 & str_detect(cid4, "Q436") ~ "Q436",
+      str_length(cid4) > 4 & str_detect(cid4, "Q440") ~ "Q440",
+      str_length(cid4) > 4 & str_detect(cid4, "Q442") ~ "Q442",
+      str_length(cid4) > 4 & str_detect(cid4, "Q446") ~ "Q446",
+      str_length(cid4) > 4 & str_detect(cid4, "Q451") ~ "Q451",
+      str_length(cid4) > 4 & str_detect(cid4, "Q422") ~ "Q422",
+      str_length(cid4) > 4 & str_detect(cid4, "Q500") ~ "Q500",
+      str_length(cid4) > 4 & str_detect(cid4, "Q501") ~ "Q501",
+      str_length(cid4) > 4 & str_detect(cid4, "Q502") ~ "Q502",
+      str_length(cid4) > 4 & str_detect(cid4, "Q505") ~ "Q505",
+      str_length(cid4) > 4 & str_detect(cid4, "Q510") ~ "Q510",
+      str_length(cid4) > 4 & str_detect(cid4, "Q513") ~ "Q513",
+      str_length(cid4) > 4 & str_detect(cid4, "Q516") ~ "Q516",
+      str_length(cid4) > 4 & str_detect(cid4, "Q517") ~ "Q517",
+      str_length(cid4) > 4 & str_detect(cid4, "Q520") ~ "Q520",
+      str_length(cid4) > 4 & str_detect(cid4, "Q521") ~ "Q521",
+      str_length(cid4) > 4 & str_detect(cid4, "Q522") ~ "Q522",
+      str_length(cid4) > 4 & str_detect(cid4, "Q526") ~ "Q526",
+      str_length(cid4) > 4 & str_detect(cid4, "Q527") ~ "Q527",
+      str_length(cid4) > 4 & str_detect(cid4, "Q549") ~ "Q549",
+      str_length(cid4) > 4 & str_detect(cid4, "Q550") ~ "Q550",
+      str_length(cid4) > 4 & str_detect(cid4, "Q553") ~ "Q553",
+      str_length(cid4) > 4 & str_detect(cid4, "Q555") ~ "Q555",
+      str_length(cid4) > 4 & str_detect(cid4, "Q560") ~ "Q560",
+      str_length(cid4) > 4 & str_detect(cid4, "Q600") ~ "Q600",
+      str_length(cid4) > 4 & str_detect(cid4, "Q601") ~ "Q601",
+      str_length(cid4) > 4 & str_detect(cid4, "Q603") ~ "Q603",
+      str_length(cid4) > 4 & str_detect(cid4, "Q604") ~ "Q604",
+      str_length(cid4) > 4 & str_detect(cid4, "Q613") ~ "Q613",
+      str_length(cid4) > 4 & str_detect(cid4, "Q614") ~ "Q614",
+      str_length(cid4) > 4 & str_detect(cid4, "Q620") ~ "Q620",
+      str_length(cid4) > 4 & str_detect(cid4, "Q624") ~ "Q624",
+      str_length(cid4) > 4 & str_detect(cid4, "Q625") ~ "Q625",
+      str_length(cid4) > 4 & str_detect(cid4, "Q630") ~ "Q630",
+      str_length(cid4) > 4 & str_detect(cid4, "Q631") ~ "Q631",
+      str_length(cid4) > 4 & str_detect(cid4, "Q632") ~ "Q632",
+      str_length(cid4) > 4 & str_detect(cid4, "Q640") ~ "Q640",
+      str_length(cid4) > 4 & str_detect(cid4, "Q641") ~ "Q642",
+      str_length(cid4) > 4 & str_detect(cid4, "Q644") ~ "Q645",
+      str_length(cid4) > 4 & str_detect(cid4, "Q646") ~ "Q646",
+      str_length(cid4) > 4 & str_detect(cid4, "Q652") ~ "Q652",
+      str_length(cid4) > 4 & str_detect(cid4, "Q66X") ~ "Q66X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q69X") ~ "Q69X",
+      str_length(cid4) > 4 & str_detect(cid4, "Q709") ~ "Q709",
+      str_length(cid4) > 4 & str_detect(cid4, "Q716") ~ "Q716",
+      str_length(cid4) > 4 & str_detect(cid4, "Q718") ~ "Q718",
+      str_length(cid4) > 4 & str_detect(cid4, "Q728") ~ "Q728",
+      str_length(cid4) > 4 & str_detect(cid4, "Q743") ~ "Q743",
+      str_length(cid4) > 4 & str_detect(cid4, "Q750") ~ "Q750",
+      str_length(cid4) > 4 & str_detect(cid4, "Q751") ~ "Q751",
+      str_length(cid4) > 4 & str_detect(cid4, "Q770") ~ "Q770",
+      str_length(cid4) > 4 & str_detect(cid4, "Q771") ~ "Q771",
+      str_length(cid4) > 4 & str_detect(cid4, "Q772") ~ "Q772",
+      str_length(cid4) > 4 & str_detect(cid4, "Q773") ~ "Q773",
+      str_length(cid4) > 4 & str_detect(cid4, "Q775") ~ "Q775",
+      str_length(cid4) > 4 & str_detect(cid4, "Q776") ~ "Q776",
+      str_length(cid4) > 4 & str_detect(cid4, "Q777") ~ "Q777",
+      str_length(cid4) > 4 & str_detect(cid4, "Q780") ~ "Q780",
+      str_length(cid4) > 4 & str_detect(cid4, "Q781") ~ "Q781",
+      str_length(cid4) > 4 & str_detect(cid4, "Q782") ~ "Q782",
+      str_length(cid4) > 4 & str_detect(cid4, "Q783") ~ "Q783",
+      str_length(cid4) > 4 & str_detect(cid4, "Q784") ~ "Q784",
+      str_length(cid4) > 4 & str_detect(cid4, "Q785") ~ "Q785",
+      str_length(cid4) > 4 & str_detect(cid4, "Q786") ~ "Q786",
+      str_length(cid4) > 4 & str_detect(cid4, "Q792") ~ "Q792",
+      str_length(cid4) > 4 & str_detect(cid4, "Q793") ~ "Q793",
+      str_length(cid4) > 4 & str_detect(cid4, "Q794") ~ "Q794",
+      str_length(cid4) > 4 & str_detect(cid4, "Q809") ~ "Q809",
+      str_length(cid4) > 4 & str_detect(cid4, "Q819") ~ "Q819",
+      str_length(cid4) > 4 & str_detect(cid4, "Q820") ~ "Q820",
+      str_length(cid4) > 4 & str_detect(cid4, "Q821") ~ "Q821",
+      str_length(cid4) > 4 & str_detect(cid4, "Q822") ~ "Q822",
+      str_length(cid4) > 4 & str_detect(cid4, "Q823") ~ "Q823",
+      str_length(cid4) > 4 & str_detect(cid4, "Q824") ~ "Q824",
+      str_length(cid4) > 4 & str_detect(cid4, "Q860") ~ "Q860",
+      str_length(cid4) > 4 & str_detect(cid4, "Q861") ~ "Q861",
+      str_length(cid4) > 4 & str_detect(cid4, "Q862") ~ "Q862",
+      TRUE ~ cid4
+    ),
+    # cid5
+    cf5 = case_when(
+      str_length(cid5) > 4 & str_detect(cid5, "Q000") ~ "Q000",
+      str_length(cid5) > 4 & str_detect(cid5, "Q01X") ~ "Q01X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q02X") ~ "Q02X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q039") ~ "Q039",
+      str_length(cid5) > 4 & str_detect(cid5, "Q040") ~ "Q040",
+      str_length(cid5) > 4 & str_detect(cid5, "Q042") ~ "Q042",
+      str_length(cid5) > 4 & str_detect(cid5, "Q045") ~ "Q045",
+      str_length(cid5) > 4 & str_detect(cid5, "Q046") ~ "Q046",
+      str_length(cid5) > 4 & str_detect(cid5, "Q05X") ~ "Q05X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q01X") ~ "Q01X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q060") ~ "Q060",
+      str_length(cid5) > 4 & str_detect(cid5, "Q062") ~ "Q062",
+      str_length(cid5) > 4 & str_detect(cid5, "Q064") ~ "Q064",
+      str_length(cid5) > 4 & str_detect(cid5, "Q104") ~ "Q104",
+      str_length(cid5) > 4 & str_detect(cid5, "Q110") ~ "Q110",
+      str_length(cid5) > 4 & str_detect(cid5, "Q111") ~ "Q111",
+      str_length(cid5) > 4 & str_detect(cid5, "Q112") ~ "Q112",
+      str_length(cid5) > 4 & str_detect(cid5, "Q113") ~ "Q120",
+      str_length(cid5) > 4 & str_detect(cid5, "Q132") ~ "Q132",
+      str_length(cid5) > 4 & str_detect(cid5, "Q150") ~ "Q150",
+      str_length(cid5) > 4 & str_detect(cid5, "Q160") ~ "Q160",
+      str_length(cid5) > 4 & str_detect(cid5, "Q200") ~ "Q200",
+      str_length(cid5) > 4 & str_detect(cid5, "Q201") ~ "Q201",
+      str_length(cid5) > 4 & str_detect(cid5, "Q202") ~ "Q202",
+      str_length(cid5) > 4 & str_detect(cid5, "Q203") ~ "Q203",
+      str_length(cid5) > 4 & str_detect(cid5, "Q204") ~ "Q204",
+      str_length(cid5) > 4 & str_detect(cid5, "Q205") ~ "Q205",
+      str_length(cid5) > 4 & str_detect(cid5, "Q206") ~ "Q206",
+      str_length(cid5) > 4 & str_detect(cid5, "Q210") ~ "Q210",
+      str_length(cid5) > 4 & str_detect(cid5, "Q211") ~ "Q211",
+      str_length(cid5) > 4 & str_detect(cid5, "Q212") ~ "Q212",
+      str_length(cid5) > 4 & str_detect(cid5, "Q213") ~ "Q213",
+      str_length(cid5) > 4 & str_detect(cid5, "Q214") ~ "Q214",
+      str_length(cid5) > 4 & str_detect(cid5, "Q220") ~ "Q220",
+      str_length(cid5) > 4 & str_detect(cid5, "Q224") ~ "Q224",
+      str_length(cid5) > 4 & str_detect(cid5, "Q230") ~ "Q230",
+      str_length(cid5) > 4 & str_detect(cid5, "Q240") ~ "Q240",
+      str_length(cid5) > 4 & str_detect(cid5, "Q242") ~ "Q242",
+      str_length(cid5) > 4 & str_detect(cid5, "Q243") ~ "Q243",
+      str_length(cid5) > 4 & str_detect(cid5, "Q244") ~ "Q244",
+      str_length(cid5) > 4 & str_detect(cid5, "Q245") ~ "Q245",
+      str_length(cid5) > 4 & str_detect(cid5, "Q251") ~ "Q251",
+      str_length(cid5) > 4 & str_detect(cid5, "Q255") ~ "Q255",
+      str_length(cid5) > 4 & str_detect(cid5, "Q260") ~ "Q260",
+      str_length(cid5) > 4 & str_detect(cid5, "Q262") ~ "Q262",
+      str_length(cid5) > 4 & str_detect(cid5, "Q265") ~ "Q265",
+      str_length(cid5) > 4 & str_detect(cid5, "Q266") ~ "Q266",
+      str_length(cid5) > 4 & str_detect(cid5, "Q300") ~ "Q300",
+      str_length(cid5) > 4 & str_detect(cid5, "Q301") ~ "Q301",
+      str_length(cid5) > 4 & str_detect(cid5, "Q302") ~ "Q302",
+      str_length(cid5) > 4 & str_detect(cid5, "Q313") ~ "Q313",
+      str_length(cid5) > 4 & str_detect(cid5, "Q322") ~ "Q322",
+      str_length(cid5) > 4 & str_detect(cid5, "Q323") ~ "Q323",
+      str_length(cid5) > 4 & str_detect(cid5, "Q330") ~ "Q330",
+      str_length(cid5) > 4 & str_detect(cid5, "Q332") ~ "Q332",
+      str_length(cid5) > 4 & str_detect(cid5, "Q333") ~ "Q333",
+      str_length(cid5) > 4 & str_detect(cid5, "Q334") ~ "Q334",
+      str_length(cid5) > 4 & str_detect(cid5, "Q335") ~ "Q335",
+      str_length(cid5) > 4 & str_detect(cid5, "Q336") ~ "Q336",
+      str_length(cid5) > 4 & str_detect(cid5, "Q340") ~ "Q340",
+      str_length(cid5) > 4 & str_detect(cid5, "Q790") ~ "Q790",
+      str_length(cid5) > 4 & str_detect(cid5, "Q35X") ~ "Q35X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q042") ~ "Q042",
+      str_length(cid5) > 4 & str_detect(cid5, "Q37X") ~ "Q37X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q042") ~ "Q042",
+      str_length(cid5) > 4 & str_detect(cid5, "Q383") ~ "Q383",
+      str_length(cid5) > 4 & str_detect(cid5, "Q384") ~ "Q383",
+      str_length(cid5) > 4 & str_detect(cid5, "Q387") ~ "Q387",
+      str_length(cid5) > 4 & str_detect(cid5, "Q390") ~ "Q390",
+      str_length(cid5) > 4 & str_detect(cid5, "Q391") ~ "Q391",
+      str_length(cid5) > 4 & str_detect(cid5, "Q392") ~ "Q392",
+      str_length(cid5) > 4 & str_detect(cid5, "Q393") ~ "Q393",
+      str_length(cid5) > 4 & str_detect(cid5, "Q396") ~ "Q396",
+      str_length(cid5) > 4 & str_detect(cid5, "Q403") ~ "Q403",
+      str_length(cid5) > 4 & str_detect(cid5, "Q410") ~ "Q410",
+      str_length(cid5) > 4 & str_detect(cid5, "Q423") ~ "Q423",
+      str_length(cid5) > 4 & str_detect(cid5, "Q428") ~ "Q428",
+      str_length(cid5) > 4 & str_detect(cid5, "Q431") ~ "Q431",
+      str_length(cid5) > 4 & str_detect(cid5, "Q433") ~ "Q433",
+      str_length(cid5) > 4 & str_detect(cid5, "Q434") ~ "Q434",
+      str_length(cid5) > 4 & str_detect(cid5, "Q435") ~ "Q435",
+      str_length(cid5) > 4 & str_detect(cid5, "Q436") ~ "Q436",
+      str_length(cid5) > 4 & str_detect(cid5, "Q440") ~ "Q440",
+      str_length(cid5) > 4 & str_detect(cid5, "Q442") ~ "Q442",
+      str_length(cid5) > 4 & str_detect(cid5, "Q446") ~ "Q446",
+      str_length(cid5) > 4 & str_detect(cid5, "Q451") ~ "Q451",
+      str_length(cid5) > 4 & str_detect(cid5, "Q422") ~ "Q422",
+      str_length(cid5) > 4 & str_detect(cid5, "Q500") ~ "Q500",
+      str_length(cid5) > 4 & str_detect(cid5, "Q501") ~ "Q501",
+      str_length(cid5) > 4 & str_detect(cid5, "Q502") ~ "Q502",
+      str_length(cid5) > 4 & str_detect(cid5, "Q505") ~ "Q505",
+      str_length(cid5) > 4 & str_detect(cid5, "Q510") ~ "Q510",
+      str_length(cid5) > 4 & str_detect(cid5, "Q513") ~ "Q513",
+      str_length(cid5) > 4 & str_detect(cid5, "Q516") ~ "Q516",
+      str_length(cid5) > 4 & str_detect(cid5, "Q517") ~ "Q517",
+      str_length(cid5) > 4 & str_detect(cid5, "Q520") ~ "Q520",
+      str_length(cid5) > 4 & str_detect(cid5, "Q521") ~ "Q521",
+      str_length(cid5) > 4 & str_detect(cid5, "Q522") ~ "Q522",
+      str_length(cid5) > 4 & str_detect(cid5, "Q526") ~ "Q526",
+      str_length(cid5) > 4 & str_detect(cid5, "Q527") ~ "Q527",
+      str_length(cid5) > 4 & str_detect(cid5, "Q549") ~ "Q549",
+      str_length(cid5) > 4 & str_detect(cid5, "Q550") ~ "Q550",
+      str_length(cid5) > 4 & str_detect(cid5, "Q553") ~ "Q553",
+      str_length(cid5) > 4 & str_detect(cid5, "Q555") ~ "Q555",
+      str_length(cid5) > 4 & str_detect(cid5, "Q560") ~ "Q560",
+      str_length(cid5) > 4 & str_detect(cid5, "Q600") ~ "Q600",
+      str_length(cid5) > 4 & str_detect(cid5, "Q601") ~ "Q601",
+      str_length(cid5) > 4 & str_detect(cid5, "Q603") ~ "Q603",
+      str_length(cid5) > 4 & str_detect(cid5, "Q604") ~ "Q604",
+      str_length(cid5) > 4 & str_detect(cid5, "Q613") ~ "Q613",
+      str_length(cid5) > 4 & str_detect(cid5, "Q614") ~ "Q614",
+      str_length(cid5) > 4 & str_detect(cid5, "Q620") ~ "Q620",
+      str_length(cid5) > 4 & str_detect(cid5, "Q624") ~ "Q624",
+      str_length(cid5) > 4 & str_detect(cid5, "Q625") ~ "Q625",
+      str_length(cid5) > 4 & str_detect(cid5, "Q630") ~ "Q630",
+      str_length(cid5) > 4 & str_detect(cid5, "Q631") ~ "Q631",
+      str_length(cid5) > 4 & str_detect(cid5, "Q632") ~ "Q632",
+      str_length(cid5) > 4 & str_detect(cid5, "Q640") ~ "Q640",
+      str_length(cid5) > 4 & str_detect(cid5, "Q641") ~ "Q642",
+      str_length(cid5) > 4 & str_detect(cid5, "Q644") ~ "Q645",
+      str_length(cid5) > 4 & str_detect(cid5, "Q646") ~ "Q646",
+      str_length(cid5) > 4 & str_detect(cid5, "Q652") ~ "Q652",
+      str_length(cid5) > 4 & str_detect(cid5, "Q66X") ~ "Q66X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q69X") ~ "Q69X",
+      str_length(cid5) > 4 & str_detect(cid5, "Q709") ~ "Q709",
+      str_length(cid5) > 4 & str_detect(cid5, "Q716") ~ "Q716",
+      str_length(cid5) > 4 & str_detect(cid5, "Q718") ~ "Q718",
+      str_length(cid5) > 4 & str_detect(cid5, "Q728") ~ "Q728",
+      str_length(cid5) > 4 & str_detect(cid5, "Q743") ~ "Q743",
+      str_length(cid5) > 4 & str_detect(cid5, "Q750") ~ "Q750",
+      str_length(cid5) > 4 & str_detect(cid5, "Q751") ~ "Q751",
+      str_length(cid5) > 4 & str_detect(cid5, "Q770") ~ "Q770",
+      str_length(cid5) > 4 & str_detect(cid5, "Q771") ~ "Q771",
+      str_length(cid5) > 4 & str_detect(cid5, "Q772") ~ "Q772",
+      str_length(cid5) > 4 & str_detect(cid5, "Q773") ~ "Q773",
+      str_length(cid5) > 4 & str_detect(cid5, "Q775") ~ "Q775",
+      str_length(cid5) > 4 & str_detect(cid5, "Q776") ~ "Q776",
+      str_length(cid5) > 4 & str_detect(cid5, "Q777") ~ "Q777",
+      str_length(cid5) > 4 & str_detect(cid5, "Q780") ~ "Q780",
+      str_length(cid5) > 4 & str_detect(cid5, "Q781") ~ "Q781",
+      str_length(cid5) > 4 & str_detect(cid5, "Q782") ~ "Q782",
+      str_length(cid5) > 4 & str_detect(cid5, "Q783") ~ "Q783",
+      str_length(cid5) > 4 & str_detect(cid5, "Q784") ~ "Q784",
+      str_length(cid5) > 4 & str_detect(cid5, "Q785") ~ "Q785",
+      str_length(cid5) > 4 & str_detect(cid5, "Q786") ~ "Q786",
+      str_length(cid5) > 4 & str_detect(cid5, "Q792") ~ "Q792",
+      str_length(cid5) > 4 & str_detect(cid5, "Q793") ~ "Q793",
+      str_length(cid5) > 4 & str_detect(cid5, "Q794") ~ "Q794",
+      str_length(cid5) > 4 & str_detect(cid5, "Q809") ~ "Q809",
+      str_length(cid5) > 4 & str_detect(cid5, "Q819") ~ "Q819",
+      str_length(cid5) > 4 & str_detect(cid5, "Q820") ~ "Q820",
+      str_length(cid5) > 4 & str_detect(cid5, "Q821") ~ "Q821",
+      str_length(cid5) > 4 & str_detect(cid5, "Q822") ~ "Q822",
+      str_length(cid5) > 4 & str_detect(cid5, "Q823") ~ "Q823",
+      str_length(cid5) > 4 & str_detect(cid5, "Q824") ~ "Q824",
+      str_length(cid5) > 4 & str_detect(cid5, "Q860") ~ "Q860",
+      str_length(cid5) > 4 & str_detect(cid5, "Q861") ~ "Q861",
+      str_length(cid5) > 4 & str_detect(cid5, "Q862") ~ "Q862",
+      TRUE ~ cid5
+    ),
+    # cid6
+    cf6 = case_when(
+      str_length(cid6) > 4 & str_detect(cid6, "Q000") ~ "Q000",
+      str_length(cid6) > 4 & str_detect(cid6, "Q01X") ~ "Q01X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q02X") ~ "Q02X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q039") ~ "Q039",
+      str_length(cid6) > 4 & str_detect(cid6, "Q040") ~ "Q040",
+      str_length(cid6) > 4 & str_detect(cid6, "Q042") ~ "Q042",
+      str_length(cid6) > 4 & str_detect(cid6, "Q045") ~ "Q045",
+      str_length(cid6) > 4 & str_detect(cid6, "Q046") ~ "Q046",
+      str_length(cid6) > 4 & str_detect(cid6, "Q05X") ~ "Q05X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q01X") ~ "Q01X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q060") ~ "Q060",
+      str_length(cid6) > 4 & str_detect(cid6, "Q062") ~ "Q062",
+      str_length(cid6) > 4 & str_detect(cid6, "Q064") ~ "Q064",
+      str_length(cid6) > 4 & str_detect(cid6, "Q104") ~ "Q104",
+      str_length(cid6) > 4 & str_detect(cid6, "Q110") ~ "Q110",
+      str_length(cid6) > 4 & str_detect(cid6, "Q111") ~ "Q111",
+      str_length(cid6) > 4 & str_detect(cid6, "Q112") ~ "Q112",
+      str_length(cid6) > 4 & str_detect(cid6, "Q113") ~ "Q120",
+      str_length(cid6) > 4 & str_detect(cid6, "Q132") ~ "Q132",
+      str_length(cid6) > 4 & str_detect(cid6, "Q150") ~ "Q150",
+      str_length(cid6) > 4 & str_detect(cid6, "Q160") ~ "Q160",
+      str_length(cid6) > 4 & str_detect(cid6, "Q200") ~ "Q200",
+      str_length(cid6) > 4 & str_detect(cid6, "Q201") ~ "Q201",
+      str_length(cid6) > 4 & str_detect(cid6, "Q202") ~ "Q202",
+      str_length(cid6) > 4 & str_detect(cid6, "Q203") ~ "Q203",
+      str_length(cid6) > 4 & str_detect(cid6, "Q204") ~ "Q204",
+      str_length(cid6) > 4 & str_detect(cid6, "Q205") ~ "Q205",
+      str_length(cid6) > 4 & str_detect(cid6, "Q206") ~ "Q206",
+      str_length(cid6) > 4 & str_detect(cid6, "Q210") ~ "Q210",
+      str_length(cid6) > 4 & str_detect(cid6, "Q211") ~ "Q211",
+      str_length(cid6) > 4 & str_detect(cid6, "Q212") ~ "Q212",
+      str_length(cid6) > 4 & str_detect(cid6, "Q213") ~ "Q213",
+      str_length(cid6) > 4 & str_detect(cid6, "Q214") ~ "Q214",
+      str_length(cid6) > 4 & str_detect(cid6, "Q220") ~ "Q220",
+      str_length(cid6) > 4 & str_detect(cid6, "Q224") ~ "Q224",
+      str_length(cid6) > 4 & str_detect(cid6, "Q230") ~ "Q230",
+      str_length(cid6) > 4 & str_detect(cid6, "Q240") ~ "Q240",
+      str_length(cid6) > 4 & str_detect(cid6, "Q242") ~ "Q242",
+      str_length(cid6) > 4 & str_detect(cid6, "Q243") ~ "Q243",
+      str_length(cid6) > 4 & str_detect(cid6, "Q244") ~ "Q244",
+      str_length(cid6) > 4 & str_detect(cid6, "Q245") ~ "Q245",
+      str_length(cid6) > 4 & str_detect(cid6, "Q251") ~ "Q251",
+      str_length(cid6) > 4 & str_detect(cid6, "Q255") ~ "Q255",
+      str_length(cid6) > 4 & str_detect(cid6, "Q260") ~ "Q260",
+      str_length(cid6) > 4 & str_detect(cid6, "Q262") ~ "Q262",
+      str_length(cid6) > 4 & str_detect(cid6, "Q265") ~ "Q265",
+      str_length(cid6) > 4 & str_detect(cid6, "Q266") ~ "Q266",
+      str_length(cid6) > 4 & str_detect(cid6, "Q300") ~ "Q300",
+      str_length(cid6) > 4 & str_detect(cid6, "Q301") ~ "Q301",
+      str_length(cid6) > 4 & str_detect(cid6, "Q302") ~ "Q302",
+      str_length(cid6) > 4 & str_detect(cid6, "Q313") ~ "Q313",
+      str_length(cid6) > 4 & str_detect(cid6, "Q322") ~ "Q322",
+      str_length(cid6) > 4 & str_detect(cid6, "Q323") ~ "Q323",
+      str_length(cid6) > 4 & str_detect(cid6, "Q330") ~ "Q330",
+      str_length(cid6) > 4 & str_detect(cid6, "Q332") ~ "Q332",
+      str_length(cid6) > 4 & str_detect(cid6, "Q333") ~ "Q333",
+      str_length(cid6) > 4 & str_detect(cid6, "Q334") ~ "Q334",
+      str_length(cid6) > 4 & str_detect(cid6, "Q335") ~ "Q335",
+      str_length(cid6) > 4 & str_detect(cid6, "Q336") ~ "Q336",
+      str_length(cid6) > 4 & str_detect(cid6, "Q340") ~ "Q340",
+      str_length(cid6) > 4 & str_detect(cid6, "Q790") ~ "Q790",
+      str_length(cid6) > 4 & str_detect(cid6, "Q35X") ~ "Q35X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q042") ~ "Q042",
+      str_length(cid6) > 4 & str_detect(cid6, "Q37X") ~ "Q37X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q042") ~ "Q042",
+      str_length(cid6) > 4 & str_detect(cid6, "Q383") ~ "Q383",
+      str_length(cid6) > 4 & str_detect(cid6, "Q384") ~ "Q383",
+      str_length(cid6) > 4 & str_detect(cid6, "Q387") ~ "Q387",
+      str_length(cid6) > 4 & str_detect(cid6, "Q390") ~ "Q390",
+      str_length(cid6) > 4 & str_detect(cid6, "Q391") ~ "Q391",
+      str_length(cid6) > 4 & str_detect(cid6, "Q392") ~ "Q392",
+      str_length(cid6) > 4 & str_detect(cid6, "Q393") ~ "Q393",
+      str_length(cid6) > 4 & str_detect(cid6, "Q396") ~ "Q396",
+      str_length(cid6) > 4 & str_detect(cid6, "Q403") ~ "Q403",
+      str_length(cid6) > 4 & str_detect(cid6, "Q410") ~ "Q410",
+      str_length(cid6) > 4 & str_detect(cid6, "Q423") ~ "Q423",
+      str_length(cid6) > 4 & str_detect(cid6, "Q428") ~ "Q428",
+      str_length(cid6) > 4 & str_detect(cid6, "Q431") ~ "Q431",
+      str_length(cid6) > 4 & str_detect(cid6, "Q433") ~ "Q433",
+      str_length(cid6) > 4 & str_detect(cid6, "Q434") ~ "Q434",
+      str_length(cid6) > 4 & str_detect(cid6, "Q435") ~ "Q435",
+      str_length(cid6) > 4 & str_detect(cid6, "Q436") ~ "Q436",
+      str_length(cid6) > 4 & str_detect(cid6, "Q440") ~ "Q440",
+      str_length(cid6) > 4 & str_detect(cid6, "Q442") ~ "Q442",
+      str_length(cid6) > 4 & str_detect(cid6, "Q446") ~ "Q446",
+      str_length(cid6) > 4 & str_detect(cid6, "Q451") ~ "Q451",
+      str_length(cid6) > 4 & str_detect(cid6, "Q422") ~ "Q422",
+      str_length(cid6) > 4 & str_detect(cid6, "Q500") ~ "Q500",
+      str_length(cid6) > 4 & str_detect(cid6, "Q501") ~ "Q501",
+      str_length(cid6) > 4 & str_detect(cid6, "Q502") ~ "Q502",
+      str_length(cid6) > 4 & str_detect(cid6, "Q505") ~ "Q505",
+      str_length(cid6) > 4 & str_detect(cid6, "Q510") ~ "Q510",
+      str_length(cid6) > 4 & str_detect(cid6, "Q513") ~ "Q513",
+      str_length(cid6) > 4 & str_detect(cid6, "Q516") ~ "Q516",
+      str_length(cid6) > 4 & str_detect(cid6, "Q517") ~ "Q517",
+      str_length(cid6) > 4 & str_detect(cid6, "Q520") ~ "Q520",
+      str_length(cid6) > 4 & str_detect(cid6, "Q521") ~ "Q521",
+      str_length(cid6) > 4 & str_detect(cid6, "Q522") ~ "Q522",
+      str_length(cid6) > 4 & str_detect(cid6, "Q526") ~ "Q526",
+      str_length(cid6) > 4 & str_detect(cid6, "Q527") ~ "Q527",
+      str_length(cid6) > 4 & str_detect(cid6, "Q549") ~ "Q549",
+      str_length(cid6) > 4 & str_detect(cid6, "Q550") ~ "Q550",
+      str_length(cid6) > 4 & str_detect(cid6, "Q553") ~ "Q553",
+      str_length(cid6) > 4 & str_detect(cid6, "Q555") ~ "Q555",
+      str_length(cid6) > 4 & str_detect(cid6, "Q560") ~ "Q560",
+      str_length(cid6) > 4 & str_detect(cid6, "Q600") ~ "Q600",
+      str_length(cid6) > 4 & str_detect(cid6, "Q601") ~ "Q601",
+      str_length(cid6) > 4 & str_detect(cid6, "Q603") ~ "Q603",
+      str_length(cid6) > 4 & str_detect(cid6, "Q604") ~ "Q604",
+      str_length(cid6) > 4 & str_detect(cid6, "Q613") ~ "Q613",
+      str_length(cid6) > 4 & str_detect(cid6, "Q614") ~ "Q614",
+      str_length(cid6) > 4 & str_detect(cid6, "Q620") ~ "Q620",
+      str_length(cid6) > 4 & str_detect(cid6, "Q624") ~ "Q624",
+      str_length(cid6) > 4 & str_detect(cid6, "Q625") ~ "Q625",
+      str_length(cid6) > 4 & str_detect(cid6, "Q630") ~ "Q630",
+      str_length(cid6) > 4 & str_detect(cid6, "Q631") ~ "Q631",
+      str_length(cid6) > 4 & str_detect(cid6, "Q632") ~ "Q632",
+      str_length(cid6) > 4 & str_detect(cid6, "Q640") ~ "Q640",
+      str_length(cid6) > 4 & str_detect(cid6, "Q641") ~ "Q642",
+      str_length(cid6) > 4 & str_detect(cid6, "Q644") ~ "Q645",
+      str_length(cid6) > 4 & str_detect(cid6, "Q646") ~ "Q646",
+      str_length(cid6) > 4 & str_detect(cid6, "Q652") ~ "Q652",
+      str_length(cid6) > 4 & str_detect(cid6, "Q66X") ~ "Q66X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q69X") ~ "Q69X",
+      str_length(cid6) > 4 & str_detect(cid6, "Q709") ~ "Q709",
+      str_length(cid6) > 4 & str_detect(cid6, "Q716") ~ "Q716",
+      str_length(cid6) > 4 & str_detect(cid6, "Q718") ~ "Q718",
+      str_length(cid6) > 4 & str_detect(cid6, "Q728") ~ "Q728",
+      str_length(cid6) > 4 & str_detect(cid6, "Q743") ~ "Q743",
+      str_length(cid6) > 4 & str_detect(cid6, "Q750") ~ "Q750",
+      str_length(cid6) > 4 & str_detect(cid6, "Q751") ~ "Q751",
+      str_length(cid6) > 4 & str_detect(cid6, "Q770") ~ "Q770",
+      str_length(cid6) > 4 & str_detect(cid6, "Q771") ~ "Q771",
+      str_length(cid6) > 4 & str_detect(cid6, "Q772") ~ "Q772",
+      str_length(cid6) > 4 & str_detect(cid6, "Q773") ~ "Q773",
+      str_length(cid6) > 4 & str_detect(cid6, "Q775") ~ "Q775",
+      str_length(cid6) > 4 & str_detect(cid6, "Q776") ~ "Q776",
+      str_length(cid6) > 4 & str_detect(cid6, "Q777") ~ "Q777",
+      str_length(cid6) > 4 & str_detect(cid6, "Q780") ~ "Q780",
+      str_length(cid6) > 4 & str_detect(cid6, "Q781") ~ "Q781",
+      str_length(cid6) > 4 & str_detect(cid6, "Q782") ~ "Q782",
+      str_length(cid6) > 4 & str_detect(cid6, "Q783") ~ "Q783",
+      str_length(cid6) > 4 & str_detect(cid6, "Q784") ~ "Q784",
+      str_length(cid6) > 4 & str_detect(cid6, "Q785") ~ "Q785",
+      str_length(cid6) > 4 & str_detect(cid6, "Q786") ~ "Q786",
+      str_length(cid6) > 4 & str_detect(cid6, "Q792") ~ "Q792",
+      str_length(cid6) > 4 & str_detect(cid6, "Q793") ~ "Q793",
+      str_length(cid6) > 4 & str_detect(cid6, "Q794") ~ "Q794",
+      str_length(cid6) > 4 & str_detect(cid6, "Q809") ~ "Q809",
+      str_length(cid6) > 4 & str_detect(cid6, "Q819") ~ "Q819",
+      str_length(cid6) > 4 & str_detect(cid6, "Q820") ~ "Q820",
+      str_length(cid6) > 4 & str_detect(cid6, "Q821") ~ "Q821",
+      str_length(cid6) > 4 & str_detect(cid6, "Q822") ~ "Q822",
+      str_length(cid6) > 4 & str_detect(cid6, "Q823") ~ "Q823",
+      str_length(cid6) > 4 & str_detect(cid6, "Q824") ~ "Q824",
+      str_length(cid6) > 4 & str_detect(cid6, "Q860") ~ "Q860",
+      str_length(cid6) > 4 & str_detect(cid6, "Q861") ~ "Q861",
+      str_length(cid6) > 4 & str_detect(cid6, "Q862") ~ "Q862",
+      TRUE ~ cid6
+    ),
+    # cid7
+    cf7 = case_when(
+      str_length(cid7) > 4 & str_detect(cid7, "Q000") ~ "Q000",
+      str_length(cid7) > 4 & str_detect(cid7, "Q01X") ~ "Q01X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q02X") ~ "Q02X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q039") ~ "Q039",
+      str_length(cid7) > 4 & str_detect(cid7, "Q040") ~ "Q040",
+      str_length(cid7) > 4 & str_detect(cid7, "Q042") ~ "Q042",
+      str_length(cid7) > 4 & str_detect(cid7, "Q045") ~ "Q045",
+      str_length(cid7) > 4 & str_detect(cid7, "Q046") ~ "Q046",
+      str_length(cid7) > 4 & str_detect(cid7, "Q05X") ~ "Q05X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q01X") ~ "Q01X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q060") ~ "Q060",
+      str_length(cid7) > 4 & str_detect(cid7, "Q062") ~ "Q062",
+      str_length(cid7) > 4 & str_detect(cid7, "Q064") ~ "Q064",
+      str_length(cid7) > 4 & str_detect(cid7, "Q104") ~ "Q104",
+      str_length(cid7) > 4 & str_detect(cid7, "Q110") ~ "Q110",
+      str_length(cid7) > 4 & str_detect(cid7, "Q111") ~ "Q111",
+      str_length(cid7) > 4 & str_detect(cid7, "Q112") ~ "Q112",
+      str_length(cid7) > 4 & str_detect(cid7, "Q113") ~ "Q120",
+      str_length(cid7) > 4 & str_detect(cid7, "Q132") ~ "Q132",
+      str_length(cid7) > 4 & str_detect(cid7, "Q150") ~ "Q150",
+      str_length(cid7) > 4 & str_detect(cid7, "Q160") ~ "Q160",
+      str_length(cid7) > 4 & str_detect(cid7, "Q200") ~ "Q200",
+      str_length(cid7) > 4 & str_detect(cid7, "Q201") ~ "Q201",
+      str_length(cid7) > 4 & str_detect(cid7, "Q202") ~ "Q202",
+      str_length(cid7) > 4 & str_detect(cid7, "Q203") ~ "Q203",
+      str_length(cid7) > 4 & str_detect(cid7, "Q204") ~ "Q204",
+      str_length(cid7) > 4 & str_detect(cid7, "Q205") ~ "Q205",
+      str_length(cid7) > 4 & str_detect(cid7, "Q206") ~ "Q206",
+      str_length(cid7) > 4 & str_detect(cid7, "Q210") ~ "Q210",
+      str_length(cid7) > 4 & str_detect(cid7, "Q211") ~ "Q211",
+      str_length(cid7) > 4 & str_detect(cid7, "Q212") ~ "Q212",
+      str_length(cid7) > 4 & str_detect(cid7, "Q213") ~ "Q213",
+      str_length(cid7) > 4 & str_detect(cid7, "Q214") ~ "Q214",
+      str_length(cid7) > 4 & str_detect(cid7, "Q220") ~ "Q220",
+      str_length(cid7) > 4 & str_detect(cid7, "Q224") ~ "Q224",
+      str_length(cid7) > 4 & str_detect(cid7, "Q230") ~ "Q230",
+      str_length(cid7) > 4 & str_detect(cid7, "Q240") ~ "Q240",
+      str_length(cid7) > 4 & str_detect(cid7, "Q242") ~ "Q242",
+      str_length(cid7) > 4 & str_detect(cid7, "Q243") ~ "Q243",
+      str_length(cid7) > 4 & str_detect(cid7, "Q244") ~ "Q244",
+      str_length(cid7) > 4 & str_detect(cid7, "Q245") ~ "Q245",
+      str_length(cid7) > 4 & str_detect(cid7, "Q251") ~ "Q251",
+      str_length(cid7) > 4 & str_detect(cid7, "Q255") ~ "Q255",
+      str_length(cid7) > 4 & str_detect(cid7, "Q260") ~ "Q260",
+      str_length(cid7) > 4 & str_detect(cid7, "Q262") ~ "Q262",
+      str_length(cid7) > 4 & str_detect(cid7, "Q265") ~ "Q265",
+      str_length(cid7) > 4 & str_detect(cid7, "Q266") ~ "Q266",
+      str_length(cid7) > 4 & str_detect(cid7, "Q300") ~ "Q300",
+      str_length(cid7) > 4 & str_detect(cid7, "Q301") ~ "Q301",
+      str_length(cid7) > 4 & str_detect(cid7, "Q302") ~ "Q302",
+      str_length(cid7) > 4 & str_detect(cid7, "Q313") ~ "Q313",
+      str_length(cid7) > 4 & str_detect(cid7, "Q322") ~ "Q322",
+      str_length(cid7) > 4 & str_detect(cid7, "Q323") ~ "Q323",
+      str_length(cid7) > 4 & str_detect(cid7, "Q330") ~ "Q330",
+      str_length(cid7) > 4 & str_detect(cid7, "Q332") ~ "Q332",
+      str_length(cid7) > 4 & str_detect(cid7, "Q333") ~ "Q333",
+      str_length(cid7) > 4 & str_detect(cid7, "Q334") ~ "Q334",
+      str_length(cid7) > 4 & str_detect(cid7, "Q335") ~ "Q335",
+      str_length(cid7) > 4 & str_detect(cid7, "Q336") ~ "Q336",
+      str_length(cid7) > 4 & str_detect(cid7, "Q340") ~ "Q340",
+      str_length(cid7) > 4 & str_detect(cid7, "Q790") ~ "Q790",
+      str_length(cid7) > 4 & str_detect(cid7, "Q35X") ~ "Q35X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q042") ~ "Q042",
+      str_length(cid7) > 4 & str_detect(cid7, "Q37X") ~ "Q37X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q042") ~ "Q042",
+      str_length(cid7) > 4 & str_detect(cid7, "Q383") ~ "Q383",
+      str_length(cid7) > 4 & str_detect(cid7, "Q384") ~ "Q383",
+      str_length(cid7) > 4 & str_detect(cid7, "Q387") ~ "Q387",
+      str_length(cid7) > 4 & str_detect(cid7, "Q390") ~ "Q390",
+      str_length(cid7) > 4 & str_detect(cid7, "Q391") ~ "Q391",
+      str_length(cid7) > 4 & str_detect(cid7, "Q392") ~ "Q392",
+      str_length(cid7) > 4 & str_detect(cid7, "Q393") ~ "Q393",
+      str_length(cid7) > 4 & str_detect(cid7, "Q396") ~ "Q396",
+      str_length(cid7) > 4 & str_detect(cid7, "Q403") ~ "Q403",
+      str_length(cid7) > 4 & str_detect(cid7, "Q410") ~ "Q410",
+      str_length(cid7) > 4 & str_detect(cid7, "Q423") ~ "Q423",
+      str_length(cid7) > 4 & str_detect(cid7, "Q428") ~ "Q428",
+      str_length(cid7) > 4 & str_detect(cid7, "Q431") ~ "Q431",
+      str_length(cid7) > 4 & str_detect(cid7, "Q433") ~ "Q433",
+      str_length(cid7) > 4 & str_detect(cid7, "Q434") ~ "Q434",
+      str_length(cid7) > 4 & str_detect(cid7, "Q435") ~ "Q435",
+      str_length(cid7) > 4 & str_detect(cid7, "Q436") ~ "Q436",
+      str_length(cid7) > 4 & str_detect(cid7, "Q440") ~ "Q440",
+      str_length(cid7) > 4 & str_detect(cid7, "Q442") ~ "Q442",
+      str_length(cid7) > 4 & str_detect(cid7, "Q446") ~ "Q446",
+      str_length(cid7) > 4 & str_detect(cid7, "Q451") ~ "Q451",
+      str_length(cid7) > 4 & str_detect(cid7, "Q422") ~ "Q422",
+      str_length(cid7) > 4 & str_detect(cid7, "Q500") ~ "Q500",
+      str_length(cid7) > 4 & str_detect(cid7, "Q501") ~ "Q501",
+      str_length(cid7) > 4 & str_detect(cid7, "Q502") ~ "Q502",
+      str_length(cid7) > 4 & str_detect(cid7, "Q505") ~ "Q505",
+      str_length(cid7) > 4 & str_detect(cid7, "Q510") ~ "Q510",
+      str_length(cid7) > 4 & str_detect(cid7, "Q513") ~ "Q513",
+      str_length(cid7) > 4 & str_detect(cid7, "Q516") ~ "Q516",
+      str_length(cid7) > 4 & str_detect(cid7, "Q517") ~ "Q517",
+      str_length(cid7) > 4 & str_detect(cid7, "Q520") ~ "Q520",
+      str_length(cid7) > 4 & str_detect(cid7, "Q521") ~ "Q521",
+      str_length(cid7) > 4 & str_detect(cid7, "Q522") ~ "Q522",
+      str_length(cid7) > 4 & str_detect(cid7, "Q526") ~ "Q526",
+      str_length(cid7) > 4 & str_detect(cid7, "Q527") ~ "Q527",
+      str_length(cid7) > 4 & str_detect(cid7, "Q549") ~ "Q549",
+      str_length(cid7) > 4 & str_detect(cid7, "Q550") ~ "Q550",
+      str_length(cid7) > 4 & str_detect(cid7, "Q553") ~ "Q553",
+      str_length(cid7) > 4 & str_detect(cid7, "Q555") ~ "Q555",
+      str_length(cid7) > 4 & str_detect(cid7, "Q560") ~ "Q560",
+      str_length(cid7) > 4 & str_detect(cid7, "Q600") ~ "Q600",
+      str_length(cid7) > 4 & str_detect(cid7, "Q601") ~ "Q601",
+      str_length(cid7) > 4 & str_detect(cid7, "Q603") ~ "Q603",
+      str_length(cid7) > 4 & str_detect(cid7, "Q604") ~ "Q604",
+      str_length(cid7) > 4 & str_detect(cid7, "Q613") ~ "Q613",
+      str_length(cid7) > 4 & str_detect(cid7, "Q614") ~ "Q614",
+      str_length(cid7) > 4 & str_detect(cid7, "Q620") ~ "Q620",
+      str_length(cid7) > 4 & str_detect(cid7, "Q624") ~ "Q624",
+      str_length(cid7) > 4 & str_detect(cid7, "Q625") ~ "Q625",
+      str_length(cid7) > 4 & str_detect(cid7, "Q630") ~ "Q630",
+      str_length(cid7) > 4 & str_detect(cid7, "Q631") ~ "Q631",
+      str_length(cid7) > 4 & str_detect(cid7, "Q632") ~ "Q632",
+      str_length(cid7) > 4 & str_detect(cid7, "Q640") ~ "Q640",
+      str_length(cid7) > 4 & str_detect(cid7, "Q641") ~ "Q642",
+      str_length(cid7) > 4 & str_detect(cid7, "Q644") ~ "Q645",
+      str_length(cid7) > 4 & str_detect(cid7, "Q646") ~ "Q646",
+      str_length(cid7) > 4 & str_detect(cid7, "Q652") ~ "Q652",
+      str_length(cid7) > 4 & str_detect(cid7, "Q66X") ~ "Q66X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q69X") ~ "Q69X",
+      str_length(cid7) > 4 & str_detect(cid7, "Q709") ~ "Q709",
+      str_length(cid7) > 4 & str_detect(cid7, "Q716") ~ "Q716",
+      str_length(cid7) > 4 & str_detect(cid7, "Q718") ~ "Q718",
+      str_length(cid7) > 4 & str_detect(cid7, "Q728") ~ "Q728",
+      str_length(cid7) > 4 & str_detect(cid7, "Q743") ~ "Q743",
+      str_length(cid7) > 4 & str_detect(cid7, "Q750") ~ "Q750",
+      str_length(cid7) > 4 & str_detect(cid7, "Q751") ~ "Q751",
+      str_length(cid7) > 4 & str_detect(cid7, "Q770") ~ "Q770",
+      str_length(cid7) > 4 & str_detect(cid7, "Q771") ~ "Q771",
+      str_length(cid7) > 4 & str_detect(cid7, "Q772") ~ "Q772",
+      str_length(cid7) > 4 & str_detect(cid7, "Q773") ~ "Q773",
+      str_length(cid7) > 4 & str_detect(cid7, "Q775") ~ "Q775",
+      str_length(cid7) > 4 & str_detect(cid7, "Q776") ~ "Q776",
+      str_length(cid7) > 4 & str_detect(cid7, "Q777") ~ "Q777",
+      str_length(cid7) > 4 & str_detect(cid7, "Q780") ~ "Q780",
+      str_length(cid7) > 4 & str_detect(cid7, "Q781") ~ "Q781",
+      str_length(cid7) > 4 & str_detect(cid7, "Q782") ~ "Q782",
+      str_length(cid7) > 4 & str_detect(cid7, "Q783") ~ "Q783",
+      str_length(cid7) > 4 & str_detect(cid7, "Q784") ~ "Q784",
+      str_length(cid7) > 4 & str_detect(cid7, "Q785") ~ "Q785",
+      str_length(cid7) > 4 & str_detect(cid7, "Q786") ~ "Q786",
+      str_length(cid7) > 4 & str_detect(cid7, "Q792") ~ "Q792",
+      str_length(cid7) > 4 & str_detect(cid7, "Q793") ~ "Q793",
+      str_length(cid7) > 4 & str_detect(cid7, "Q794") ~ "Q794",
+      str_length(cid7) > 4 & str_detect(cid7, "Q809") ~ "Q809",
+      str_length(cid7) > 4 & str_detect(cid7, "Q819") ~ "Q819",
+      str_length(cid7) > 4 & str_detect(cid7, "Q820") ~ "Q820",
+      str_length(cid7) > 4 & str_detect(cid7, "Q821") ~ "Q821",
+      str_length(cid7) > 4 & str_detect(cid7, "Q822") ~ "Q822",
+      str_length(cid7) > 4 & str_detect(cid7, "Q823") ~ "Q823",
+      str_length(cid7) > 4 & str_detect(cid7, "Q824") ~ "Q824",
+      str_length(cid7) > 4 & str_detect(cid7, "Q860") ~ "Q860",
+      str_length(cid7) > 4 & str_detect(cid7, "Q861") ~ "Q861",
+      str_length(cid7) > 4 & str_detect(cid7, "Q862") ~ "Q862",
+      TRUE ~ cid7
+    )
+  )
+```
+
+\newpage
+
+# 4. Análise APC/AAPC
+
+Nesta seção, a APC e a AAPC, por grupo de malformação, é realizada.
+
+```{r}
+# transformando dados em formato longo
+d_coda <- d_anom |> select(ano_nasc, cf2:cf7)
+
+d_long <- d_coda |> pivot_longer(cols = cf2:cf7, names_to = "coda_eurocat", values_to = "cid10")
+```
+
+```{r}
+# tabela com as cids agrupadas recodificadas pela mariana s.
+d_recod <- readxl::read_excel("tab_auxiliares/coda_recod.xlsx") |>
+  rename(cid10_coa = `...4`) |>
+  select(cid10, cid10_coa)
+
+# tabelas de frequencias das cid-10, segundo grupos e subgrupos da eurocat
+freqs_cid10 <- readxl::read_xlsx("tab_auxiliares/freqs_cid10_eurocat.xlsx", skip = 1)
+
+# dados nascidos 11-20
+nascidos_por_ano <- fs::dir_ls("01.dados/nascidos/", glob = "*.csv")
+
+dados_nascidos <- map(nascidos_por_ano, readr::read_csv2) |> 
+  list_rbind() |> 
+  select(`ano (nome)`, `localidade (nome)`, Ano) |> 
+  rename(ano_nasc = `ano (nome)`, local = `localidade (nome)`, total = Ano) |> 
+  mutate(
+    ano_nasc = as.character(ano_nasc),
+    nivel = case_when(
+      local == "Brasil" ~ "país",
+      (local == "Norte" | local == "Nordeste" | local == "Centro-Oeste" |
+         local == "Sudeste" | local == "Sul") ~ "região",
+      TRUE ~ "estado"
+    )
+  )
+
+dados_nasc_ano <- dados_nascidos |> 
+  filter(local == "Brasil") |> 
+  select(-c(local, nivel))
+```
+
+```{r}
+tab <- d_long |> 
+  filter(cid10 == "Q250" | !cid10 %in% cid_menor$categoria_cid10) |>
+  filter(!is.na(cid10)) |> 
+  left_join(d_recod, by = "cid10") |>
+  mutate(cid10_novo = coalesce(cid10_coa, cid10)) |> 
+  select(-c(coda_eurocat, cid10, cid10_coa)) |> 
+  left_join(freqs_cid10 |> select(cid10, grupo), by = join_by("cid10_novo" == "cid10")) |> 
+  mutate(
+    grupo = case_when(
+      grupo == "Membros" ~ "Limbs",
+      grupo == "Sistema nervoso" ~ "Nervous system",
+      grupo == "Cardiopatias" ~ "Congenital heart defect",
+      grupo == "Fendas oro-faciais" ~ "Cleft lip and cleft palate",
+      grupo == "Genitália" ~ "Genital organs", 
+      grupo == "Outros" ~ "Other congenital anomalies",
+      grupo == "Sistema digestivo" ~ "Digestive system",
+      grupo == "Defeitos de parede abdominal" ~ "Abdominal wall defects",
+      grupo == "Sistema urinário" ~ "Urinary system",
+      grupo == "Respiratórias" ~ "Respiratory system",
+      grupo == "Orelha, face e pescoço" ~ "Ear, face and neck",
+      grupo == "Olhos" ~ "Eyes",
+      TRUE ~ NA_character_
+    )
+  ) |> 
+  group_by(ano_nasc, grupo) |> 
+  summarise(n = n()) |> 
+  left_join(dados_nasc_ano |> mutate_at("ano_nasc", as.numeric), by = "ano_nasc") |> 
+  mutate_at("ano_nasc", as.integer)
+
+# calculo das prevalencias
+tab_prev <- tab |> mutate(prev = round((n / total) * 1000, 2))
+```
+
+```{r}
+# calculo da acp/aacp
+calc_apc <- function(df, outcome, year, group) {
+  results <- df |>
+    group_by(!!sym(group)) |>
+    do({
+      model <- lm(log(.[[outcome]]) ~ .[[year]], data = .)
+      beta1 <- coef(model)[2] 
+      se_beta1 <- summary(model)$coefficients[2, 2]
+      p_value <- summary(model)$coefficients[2, 4]
+      conf_int <- confint(model, level = 0.95)[2, ]
+
+      data.frame(
+        grupo = unique(.[[group]]),
+        apc_aapc = round((exp(beta1) - 1) * 100, 2),  
+        ic95 = paste0("(", round((exp(conf_int[1]) - 1) * 100, 2), "; ", round((exp(conf_int[2]) - 1) * 100, 2), ")"),
+        valor_p = round(p_value, 3)
+      )
+    })
+
+  return(results)
+}
+
+# resultado
+calc_apc(tab_prev, "prev", "ano_nasc", "grupo") |> kable()
+```
+
