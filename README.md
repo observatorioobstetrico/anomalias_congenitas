@@ -8,7 +8,7 @@ Funding: Bill & Melinda Gates Foundation, CNPq and FAPES.
 
 ### Data
 
-SINASC - `01.dados/`
+SINASC - `01.data/`
 
 ### Script
 
